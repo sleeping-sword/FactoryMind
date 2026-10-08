@@ -52,7 +52,39 @@
 | 後端 | FastAPI、PostgreSQL |
 | 前端 | React / Next.js、Chart.js |
 
+## 目前進度
+
+底層(不呼叫 AI 的部分)已可運作,位於 `backend/factorymind/`:
+
+| 模組 | 內容 |
+| --- | --- |
+| `models.py` | 工廠快照:機台、模具、塑料、產品、客戶、工單、班別 |
+| `plan.py` | 候選方案與評估結果的資料契約 |
+| `replay.py` | 虛擬工廠試跑:班別、序列相依換模、模具不可同時在兩台機上 |
+| `rules.py` | 硬規則檢核:模具—機台相容、停機、缺料、加班上限與預算、已開工工單、延誤上限 |
+| `evaluate.py` | 方案評估介面:計算是否成功、是否可行、是否過硬規則分開回報 |
+| `dispatch.py` | 派工法則排程器(FIFO／交期／策略客戶優先),作為規則基準 |
+| `ranking.py` | 依企業順位與門檻逐一比較方案 |
+| `events.py` | 擾動事件:機台停機、急單,產生新版本快照 |
+| `scenarios/demo.py` | 合成的射出廠與示範政策 |
+
+尚未開始:最佳化求解器、治理主線狀態機、資料庫、API、LLM 角色、前端。
+
+## 開發
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest          # 測試
+.venv/bin/python -m factorymind.demo  # 示範:IM-02 停機 + 急單
+```
+
+需要 Python 3.10 以上。時間單位一律為分鐘(自快照時間起算),金額為新台幣。
+
 ## 文件
 
 - [系統概述文件](docs/系統概述文件.pdf)
 - [FactoryMind 完整產品與系統架構 v0.5](<docs/FactoryMind 完整產品與系統架構 v0.5.pdf>)
+- [初選構想書](<docs/FactoryMind_初選構想書_塑膠射出 (1).pdf>)
+- [LLM 部署策略:競賽用雲端,落地改地端](docs/LLM部署策略.md)
