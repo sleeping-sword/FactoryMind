@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# 環境變數與金鑰
+.env
+.env.*
+!.env.example
+
+# 編輯器 / 系統
+.vscode/
+.idea/
+.DS_Store
