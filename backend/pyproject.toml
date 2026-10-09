@@ -1,0 +1,19 @@
+[project]
+name = "factorymind"
+version = "0.1.0"
+description = "FactoryMind 後端:虛擬工廠、方案評估與治理"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["factorymind*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
