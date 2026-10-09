@@ -1,13 +1,15 @@
-// 與後端 factorymind 的資料契約對應(models.py、plan.py、policy.py、ranking.py、demo.py)。
+// 與後端 factorymind 的資料契約對應(models.py、plan.py、policy.py、ranking.py、governance.py)。
 
 export type Metric = "strategic_tardiness_min" | "total_tardiness_min" | "changed_work_orders" | "cost_ntd";
 
 export interface Machine {
   id: string;
+  role: string;
   tonnage: number;
   status: "up" | "down";
   current_mold_id: string | null;
   current_material_id: string | null;
+  current_color_shade: number | null;
 }
 
 export interface Mold {
@@ -18,6 +20,7 @@ export interface Mold {
 
 export interface Product {
   id: string;
+  name: string;
   mold_id: string;
   material_id: string;
 }
@@ -111,23 +114,101 @@ export interface Elimination {
   threshold: number | null;
 }
 
-export interface DemoRun {
-  policy: {
-    version: string;
-    hard_limits: { max_overtime_min_per_machine_day: number; overtime_budget_ntd: number };
-    ranking: { metric: Metric; threshold: number }[];
-  };
-  before: Snapshot;
-  original: Evaluation;
-  events: { type: "machine_down" | "rush_order"; subject: string; note: string }[];
-  after: Snapshot;
+export interface Policy {
+  version: string;
+  hard_limits: { max_overtime_min_per_machine_day: number; overtime_budget_ntd: number };
+  ranking: { metric: Metric; threshold: number }[];
+}
+
+export interface Ranking {
+  winner: string | null;
+  eliminated: Elimination[];
+  undecided_reason: string | null;
+  tie_break: string | null;
+}
+
+export type Stage = "detect" | "assess" | "propose" | "simulate" | "decide" | "report";
+
+export type Status =
+  | "processing"
+  | "awaiting_approval"
+  | "no_compliant_plan"
+  | "rejected"
+  | "stale"
+  | "failed"
+  | "applied_pending_tasks"
+  | "closed";
+
+export interface FactoryEvent {
+  type: "machine_down" | "rush_order";
+  subject: string;
+  note: string;
+  work_order: WorkOrder | null;
+}
+
+export interface Task {
+  id: string;
+  subject: string;
+  role: string;
+  description: string;
+  done: boolean;
+  done_by: string | null;
+  done_at: string | null;
+}
+
+export interface Decision {
+  kind: "approved" | "rejected";
+  plan_id: string | null;
+  actor: string;
+  at: string;
+  reason: string;
+  followed_recommendation: boolean | null;
+}
+
+export interface TraceEntry {
+  seq: number;
+  at: string;
+  stage: Stage;
+  actor: string;
+  message: string;
+}
+
+export interface Incident {
+  id: string;
+  title: string;
+  opened_at: string;
+  events: FactoryEvent[];
+  status: Status;
+  stage: Stage;
+  snapshot: Snapshot;
+  policy_version: string;
+  reference: Evaluation;
+  assessment: { affected_work_orders: string[]; if_unhandled: string[] } | null;
   plans: Plan[];
   evaluations: Evaluation[];
   search: Record<string, { start_rule: string; moves: number; evaluations: number; local_optimum: boolean }>;
-  ranking: {
-    winner: string | null;
-    eliminated: Elimination[];
-    undecided_reason: string | null;
-    tie_break: string | null;
-  };
+  ranking: Ranking | null;
+  decisions: Decision[];
+  applied_plan_id: string | null;
+  tasks: Task[];
+  trace: TraceEntry[];
+  error: string | null;
+}
+
+export interface IncidentSummary {
+  id: string;
+  title: string;
+  opened_at: string;
+  status: Status;
+  stage: Stage;
+  trace_length: number;
+}
+
+export interface FactoryState {
+  revision: number;
+  running: boolean;
+  snapshot: Snapshot;
+  policy: Policy;
+  schedule: { version: number; plan: Plan; evaluation: Evaluation; still_valid: boolean };
+  incidents: IncidentSummary[];
 }

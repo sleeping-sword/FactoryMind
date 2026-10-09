@@ -27,12 +27,12 @@ def due(day: int) -> int:
 
 def demo_snapshot() -> FactorySnapshot:
     machines = [
-        Machine(id="IM-01", tonnage=80, current_mold_id="MD-E", current_material_id="PP", current_color_shade=1),
-        Machine(id="IM-02", tonnage=120, current_mold_id="MD-B", current_material_id="PC", current_color_shade=0),
-        Machine(id="IM-03", tonnage=120, current_mold_id="MD-G", current_material_id="ABS", current_color_shade=1),
-        Machine(id="IM-04", tonnage=200, current_mold_id="MD-D", current_material_id="ABS", current_color_shade=5),
-        Machine(id="IM-05", tonnage=150, current_mold_id="MD-A", current_material_id="ABS", current_color_shade=1),
-        Machine(id="IM-06", tonnage=300, current_mold_id="MD-F", current_material_id="PC", current_color_shade=8),
+        Machine(id="IM-01", role="小型機:按鍵、小外殼等小件", tonnage=80, current_mold_id="MD-E", current_material_id="PP", current_color_shade=1),
+        Machine(id="IM-02", role="中小型機:外殼、上蓋、醫療盒", tonnage=120, current_mold_id="MD-B", current_material_id="PC", current_color_shade=0),
+        Machine(id="IM-03", role="中小型機:外殼、上蓋、醫療盒", tonnage=120, current_mold_id="MD-G", current_material_id="ABS", current_color_shade=1),
+        Machine(id="IM-04", role="中大型機:車用飾板、上蓋、醫療盒", tonnage=200, current_mold_id="MD-D", current_material_id="ABS", current_color_shade=5),
+        Machine(id="IM-05", role="中型機:外殼、車用飾板、上蓋", tonnage=150, current_mold_id="MD-A", current_material_id="ABS", current_color_shade=1),
+        Machine(id="IM-06", role="大型機:車用儀表框等大件", tonnage=300, current_mold_id="MD-F", current_material_id="PC", current_color_shade=8),
     ]
     molds = [
         Mold(id="MD-A", min_tonnage=80, max_tonnage=150),
@@ -49,16 +49,16 @@ def demo_snapshot() -> FactorySnapshot:
         Material(id="PP", on_hand_kg=1200),
     ]
     products = [
-        Product(id="A-WHT", mold_id="MD-A", material_id="ABS", color_shade=1, units_per_hour=400, material_kg_per_unit=0.05, outsource_unit_cost_ntd=9),
-        Product(id="A-BLK", mold_id="MD-A", material_id="ABS", color_shade=8, units_per_hour=400, material_kg_per_unit=0.05, outsource_unit_cost_ntd=9),
-        Product(id="B-CLR", mold_id="MD-B", material_id="PC", color_shade=0, units_per_hour=300, material_kg_per_unit=0.08, outsource_unit_cost_ntd=14),
-        Product(id="C-MED", mold_id="MD-C", material_id="PP", color_shade=0, units_per_hour=500, material_kg_per_unit=0.03, outsource_unit_cost_ntd=11),
-        Product(id="D-GRY", mold_id="MD-D", material_id="ABS", color_shade=5, units_per_hour=200, material_kg_per_unit=0.15, outsource_unit_cost_ntd=26),
-        Product(id="D-BLK", mold_id="MD-D", material_id="ABS", color_shade=8, units_per_hour=200, material_kg_per_unit=0.15, outsource_unit_cost_ntd=26),
-        Product(id="E-WHT", mold_id="MD-E", material_id="PP", color_shade=1, units_per_hour=600, material_kg_per_unit=0.02, outsource_unit_cost_ntd=5),
-        Product(id="E-BLU", mold_id="MD-E", material_id="PP", color_shade=5, units_per_hour=600, material_kg_per_unit=0.02, outsource_unit_cost_ntd=5),
-        Product(id="F-BLK", mold_id="MD-F", material_id="PC", color_shade=8, units_per_hour=150, material_kg_per_unit=0.25),
-        Product(id="G-WHT", mold_id="MD-G", material_id="ABS", color_shade=1, units_per_hour=350, material_kg_per_unit=0.06, outsource_unit_cost_ntd=10),
+        Product(id="A-WHT", name="電子產品外殼(白)", mold_id="MD-A", material_id="ABS", color_shade=1, units_per_hour=400, material_kg_per_unit=0.05, outsource_unit_cost_ntd=9),
+        Product(id="A-BLK", name="電子產品外殼(黑)", mold_id="MD-A", material_id="ABS", color_shade=8, units_per_hour=400, material_kg_per_unit=0.05, outsource_unit_cost_ntd=9),
+        Product(id="B-CLR", name="透明上蓋", mold_id="MD-B", material_id="PC", color_shade=0, units_per_hour=300, material_kg_per_unit=0.08, outsource_unit_cost_ntd=14),
+        Product(id="C-MED", name="醫療耗材盒", mold_id="MD-C", material_id="PP", color_shade=0, units_per_hour=500, material_kg_per_unit=0.03, outsource_unit_cost_ntd=11),
+        Product(id="D-GRY", name="車用內裝飾板(灰)", mold_id="MD-D", material_id="ABS", color_shade=5, units_per_hour=200, material_kg_per_unit=0.15, outsource_unit_cost_ntd=26),
+        Product(id="D-BLK", name="車用內裝飾板(黑)", mold_id="MD-D", material_id="ABS", color_shade=8, units_per_hour=200, material_kg_per_unit=0.15, outsource_unit_cost_ntd=26),
+        Product(id="E-WHT", name="按鍵(白)", mold_id="MD-E", material_id="PP", color_shade=1, units_per_hour=600, material_kg_per_unit=0.02, outsource_unit_cost_ntd=5),
+        Product(id="E-BLU", name="按鍵(藍)", mold_id="MD-E", material_id="PP", color_shade=5, units_per_hour=600, material_kg_per_unit=0.02, outsource_unit_cost_ntd=5),
+        Product(id="F-BLK", name="車用儀表框(黑)", mold_id="MD-F", material_id="PC", color_shade=8, units_per_hour=150, material_kg_per_unit=0.25),
+        Product(id="G-WHT", name="充電座外殼(白)", mold_id="MD-G", material_id="ABS", color_shade=1, units_per_hour=350, material_kg_per_unit=0.06, outsource_unit_cost_ntd=10),
     ]
     customers = [
         Customer(id="C-A", name="策略客戶 A(醫療)", tier=CustomerTier.STRATEGIC),

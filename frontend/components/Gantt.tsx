@@ -42,11 +42,14 @@ export default function Gantt({
   evaluation,
   overtime,
   axisEnd,
+  flagged,
 }: {
   snapshot: Snapshot;
   evaluation: Evaluation;
   overtime: OvertimeGrant[];
   axisEnd: number;
+  /** 需要特別標出的工單,例如排在停機機台上、必須搬走的工單。 */
+  flagged?: Set<string>;
 }) {
   const [tip, setTip] = useState<{ bar: Bar; x: number; y: number } | null>(null);
   const cal = snapshot.calendar;
@@ -57,6 +60,7 @@ export default function Gantt({
 
   const workOrders = new Map(snapshot.work_orders.map((w) => [w.id, w]));
   const customers = new Map(snapshot.customers.map((c) => [c.id, c]));
+  const productNames = new Map(snapshot.products.map((p) => [p.id, p.name]));
   const days = Array.from({ length: Math.ceil(axisEnd / MIN_PER_DAY) }, (_, day) => day);
 
   const rows = snapshot.machines.map((machine) => {
@@ -138,7 +142,7 @@ export default function Gantt({
                 return bar.segments.map((segment) => (
                   <span
                     key={`${bar.op.work_order_id}-${segment.from}`}
-                    className={`gantt-bar tier-${bar.customer.tier}${segment.setup ? " is-setup" : ""}`}
+                    className={`gantt-bar tier-${bar.customer.tier}${segment.setup ? " is-setup" : ""}${flagged?.has(bar.op.work_order_id) ? " is-flagged" : ""}`}
                     style={{ left: pct(segment.from), width: width(segment.from, segment.to) }}
                     tabIndex={segment === widest ? 0 : -1}
                     aria-label={`${bar.op.work_order_id} ${clock(bar.op.start_min)} 至 ${clock(bar.op.end_min)}`}
@@ -173,7 +177,7 @@ export default function Gantt({
           <dl>
             <dt>產品</dt>
             <dd>
-              {tip.bar.workOrder.product_id} × {num(tip.bar.workOrder.quantity - tip.bar.workOrder.quantity_done)} 件
+              {productNames.get(tip.bar.workOrder.product_id) || tip.bar.workOrder.product_id} × {num(tip.bar.workOrder.quantity - tip.bar.workOrder.quantity_done)} 件
             </dd>
             <dt>時間</dt>
             <dd>

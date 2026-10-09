@@ -29,6 +29,7 @@ class WorkOrderStatus(str, Enum):
 
 class Machine(Model):
     id: str
+    role: str = Field(default="", description="這台機台適合做什麼,給人看的說明")
     tonnage: int = Field(gt=0, description="鎖模力(噸)")
     status: MachineStatus = MachineStatus.UP
     # 目前機上的模具、塑料與顏色,決定下一張工單的換模時間
@@ -50,6 +51,7 @@ class Material(Model):
 
 class Product(Model):
     id: str
+    name: str = Field(default="", description="品名,給人看的說明")
     mold_id: str
     material_id: str
     color_shade: int = Field(ge=0, le=9, description="0 最淺、9 最深")

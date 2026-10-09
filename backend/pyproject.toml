@@ -3,10 +3,10 @@ name = "factorymind"
 version = "0.1.0"
 description = "FactoryMind 後端:虛擬工廠、方案評估與治理"
 requires-python = ">=3.10"
-dependencies = ["pydantic>=2.6"]
+dependencies = ["pydantic>=2.6", "fastapi>=0.110", "uvicorn>=0.29"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [build-system]
 requires = ["setuptools>=68"]
