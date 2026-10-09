@@ -1,6 +1,17 @@
 """擾動事件:套用後產生新版本的快照,不修改原快照。事件發生時間即快照第 0 分鐘。"""
 
-from .models import FactorySnapshot, MachineStatus, WorkOrder, WorkOrderStatus, by_id
+from typing import Literal
+
+from .models import FactorySnapshot, MachineStatus, Model, WorkOrder, WorkOrderStatus, by_id
+
+
+class FactoryEvent(Model):
+    """虛擬工廠發出的擾動事件。急單需附上工單內容。"""
+
+    type: Literal["machine_down", "rush_order"]
+    subject: str
+    note: str = ""
+    work_order: WorkOrder | None = None
 
 
 def machine_down(snapshot: FactorySnapshot, machine_id: str) -> FactorySnapshot:
@@ -31,3 +42,21 @@ def add_rush_order(snapshot: FactorySnapshot, work_order: WorkOrder) -> FactoryS
     return snapshot.model_copy(
         update={"work_orders": [*snapshot.work_orders, work_order], "version": snapshot.version + 1}
     )
+
+
+def apply_event(snapshot: FactorySnapshot, event: FactoryEvent) -> FactorySnapshot:
+    if event.type == "machine_down":
+        return machine_down(snapshot, event.subject)
+    if event.work_order is None:
+        raise ValueError(f"急單事件 {event.subject} 缺少工單內容")
+    return add_rush_order(snapshot, event.work_order)
+
+
+def machine_restored(snapshot: FactorySnapshot, machine_id: str) -> FactorySnapshot:
+    """維修確認復機後,機台才恢復可用。"""
+    if machine_id not in by_id(snapshot.machines):
+        raise ValueError(f"不存在的機台 {machine_id}")
+    machines = [
+        m.model_copy(update={"status": MachineStatus.UP}) if m.id == machine_id else m for m in snapshot.machines
+    ]
+    return snapshot.model_copy(update={"machines": machines, "version": snapshot.version + 1})

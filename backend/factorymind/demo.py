@@ -1,11 +1,4 @@
-"""示範:IM-02 停機同時遇到策略客戶急單。
-
-執行方式:python -m factorymind.demo
-加上 --json 改為輸出前端使用的資料:python -m factorymind.demo --json > ../frontend/data/demo.json
-"""
-
-import json
-import sys
+"""示範:IM-02 停機同時遇到策略客戶急單。執行方式:python -m factorymind.demo"""
 
 from pydantic import BaseModel
 
@@ -112,10 +105,6 @@ def run_demo() -> DemoRun:
 
 def main() -> None:
     run = run_demo()
-    if "--json" in sys.argv[1:]:
-        json.dump(run.model_dump(mode="json"), sys.stdout, ensure_ascii=False, indent=1)
-        return
-
     print(f"== 原始工廠(快照 v{run.before.version},政策 {run.policy.version})")
     print_summary(run.original, "原始排程")
     print_schedule(run.original)
