@@ -6,7 +6,7 @@ from . import ENGINE_VERSION
 from .models import CustomerTier, FactorySnapshot, MachineStatus, WorkOrderStatus, by_id
 from .plan import Evaluation, EvaluationStatus, Kpis, Operation, Plan
 from .policy import Policy
-from .replay import replay, working_windows
+from .replay import replay, run_minutes, working_windows
 from .rules import check_hard_rules
 
 
@@ -96,7 +96,9 @@ def evaluate(
 
     busy: Counter[str] = Counter()
     for op in operations:
-        busy[op.machine_id] += op.end_min - op.start_min
+        # 只計換模與加工的分鐘數;開始到結束的時間差會把跨夜停工也算進去
+        wo = work_orders[op.work_order_id]
+        busy[op.machine_id] += op.setup_min + run_minutes(wo.remaining, products[wo.product_id])
     load = {}
     for machine in snapshot.machines:
         if machine.status == MachineStatus.UP:

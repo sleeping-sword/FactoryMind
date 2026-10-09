@@ -69,7 +69,9 @@
 | `events.py` | 擾動事件:機台停機、急單,產生新版本快照 |
 | `scenarios/demo.py` | 合成的射出廠與示範政策 |
 
-尚未開始:治理主線狀態機、資料庫、API、LLM 角色、前端。
+前端 `frontend/`(Next.js)目前有一頁**方案比較**:事件摘要、企業政策順位、六個候選方案的指標與淘汰原因、各機台排程甘特圖。資料來自後端匯出的 `frontend/data/demo.json`,尚未接 API。
+
+尚未開始:治理主線狀態機、資料庫、API、LLM 角色、其餘前端頁面。
 
 ## 開發
 
@@ -81,7 +83,16 @@ python3 -m venv .venv
 .venv/bin/python -m factorymind.demo  # 示範:IM-02 停機 + 急單
 ```
 
-需要 Python 3.10 以上。時間單位一律為分鐘(自快照時間起算),金額為新台幣。
+前端:
+
+```bash
+cd backend && .venv/bin/python -m factorymind.demo --json > ../frontend/data/demo.json  # 後端有改動時重新匯出
+cd ../frontend
+npm install
+npm run dev    # http://localhost:3000
+```
+
+需要 Python 3.10 以上、Node.js 20 以上。時間單位一律為分鐘(自快照時間起算),金額為新台幣。
 
 ## 文件
 

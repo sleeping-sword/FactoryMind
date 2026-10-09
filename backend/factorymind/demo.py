@@ -1,12 +1,23 @@
-"""示範:IM-02 停機同時遇到策略客戶急單。執行方式:python -m factorymind.demo"""
+"""示範:IM-02 停機同時遇到策略客戶急單。
+
+執行方式:python -m factorymind.demo
+加上 --json 改為輸出前端使用的資料:python -m factorymind.demo --json > ../frontend/data/demo.json
+"""
+
+import json
+import sys
+
+from pydantic import BaseModel
+
 
 from .dispatch import dispatch
 from .evaluate import evaluate
 from .events import add_rush_order, machine_down
-from .models import MIN_PER_DAY
-from .optimize import optimize
-from .plan import Evaluation, OvertimeGrant
-from .ranking import rank
+from .models import MIN_PER_DAY, FactorySnapshot
+from .optimize import SearchResult, optimize
+from .plan import Evaluation, OvertimeGrant, Plan
+from .policy import Policy
+from .ranking import RankingResult, rank
 from .scenarios.demo import demo_policy, demo_rush_order, demo_snapshot
 
 
@@ -47,16 +58,29 @@ def print_summary(ev: Evaluation, label: str) -> None:
         )
 
 
-def main() -> None:
+class DemoEvent(BaseModel):
+    type: str
+    subject: str
+    note: str
+
+
+class DemoRun(BaseModel):
+    policy: Policy
+    before: FactorySnapshot
+    original: Evaluation
+    events: list[DemoEvent]
+    after: FactorySnapshot
+    plans: list[Plan]
+    evaluations: list[Evaluation]
+    search: dict[str, SearchResult]
+    ranking: RankingResult
+
+
+def run_demo() -> DemoRun:
     policy = demo_policy()
     before = demo_snapshot()
     original = evaluate(before, dispatch(before, plan_id="ORIGINAL", label="原始排程"), policy)
-    print(f"== 原始工廠(快照 v{before.version},政策 {policy.version})")
-    print_summary(original, "原始排程")
-    print_schedule(original)
-
     after = add_rush_order(machine_down(before, "IM-02"), demo_rush_order())
-    print(f"\n== 事件:IM-02 停機(復機時間未知)+ 急單 WO-R1 → 快照 v{after.version}")
 
     two_days = [OvertimeGrant(machine_id=m, day=d, minutes=240) for m in ("IM-03", "IM-05") for d in (0, 1)]
     plans = [
@@ -70,15 +94,42 @@ def main() -> None:
     search = optimize(after, policy, plan_id="P6", label="局部搜尋重排(不加班、不外包)", reference=original)
     plans.append(search.plan)
     evaluations = [evaluate(after, plan, policy, reference=original) for plan in plans]
-    for plan, ev in zip(plans, evaluations):
-        print_summary(ev, plan.label)
-
-    print(
-        f"  (P6 自 {search.start_rule} 法則出發,改進 {search.moves} 步,試算 {search.evaluations} 個方案,"
-        f"{'已達局部最佳' if search.local_optimum else '試算次數用完'})"
+    return DemoRun(
+        policy=policy,
+        before=before,
+        original=original,
+        events=[
+            DemoEvent(type="machine_down", subject="IM-02", note="復機時間未知"),
+            DemoEvent(type="rush_order", subject="WO-R1", note="策略客戶的隔日醫療件急單"),
+        ],
+        after=after,
+        plans=plans,
+        evaluations=evaluations,
+        search={"P6": search},
+        ranking=rank(evaluations, policy.ranking),
     )
 
-    result = rank(evaluations, policy.ranking)
+
+def main() -> None:
+    run = run_demo()
+    if "--json" in sys.argv[1:]:
+        json.dump(run.model_dump(mode="json"), sys.stdout, ensure_ascii=False, indent=1)
+        return
+
+    print(f"== 原始工廠(快照 v{run.before.version},政策 {run.policy.version})")
+    print_summary(run.original, "原始排程")
+    print_schedule(run.original)
+
+    print(f"\n== 事件:IM-02 停機(復機時間未知)+ 急單 WO-R1 → 快照 v{run.after.version}")
+    for plan, ev in zip(run.plans, run.evaluations):
+        print_summary(ev, plan.label)
+    for search in run.search.values():
+        print(
+            f"  ({search.plan.id} 自 {search.start_rule} 法則出發,改進 {search.moves} 步,試算 {search.evaluations} 個方案,"
+            f"{'已達局部最佳' if search.local_optimum else '試算次數用完'})"
+        )
+
+    result = run.ranking
     print("\n== 排序")
     for e in result.eliminated:
         detail = f"(值 {e.value:g},最佳 {e.best:g},門檻 {e.threshold:g})" if e.value is not None else ""
@@ -87,7 +138,7 @@ def main() -> None:
         print(" ", result.tie_break)
     if result.winner:
         print(f"  推薦方案: {result.winner}")
-        print_schedule(next(ev for ev in evaluations if ev.plan_id == result.winner))
+        print_schedule(next(ev for ev in run.evaluations if ev.plan_id == result.winner))
     else:
         print(f"  未選出方案: {result.undecided_reason}")
 

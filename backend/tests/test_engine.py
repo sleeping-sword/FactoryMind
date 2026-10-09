@@ -220,3 +220,10 @@ def test_changed_count_ignores_new_rush_order():
     assert appended.kpis.changed_work_orders == 0
     inserted = evaluate(after, plan(m1=["R1", "W1"], m2=["W2"]), POLICY, reference=original)
     assert inserted.kpis.changed_work_orders == 1
+
+
+def test_machine_load_excludes_overnight_pause():
+    # 700 分鐘的工單第一天做 600 分、隔天再做 100 分,中間停工不算負荷
+    ev = evaluate(factory([wo("W1", "PX", 700)]), plan(m1=["W1"]), POLICY)
+    assert spans(ev)["W1"] == ("M1", 480, 0, 2020)
+    assert ev.kpis.machine_load["M1"] == round(700 / 1200, 3)
