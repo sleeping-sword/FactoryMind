@@ -4,6 +4,7 @@ from .dispatch import dispatch
 from .evaluate import evaluate
 from .events import add_rush_order, machine_down
 from .models import MIN_PER_DAY
+from .optimize import optimize
 from .plan import Evaluation, OvertimeGrant
 from .ranking import rank
 from .scenarios.demo import demo_policy, demo_rush_order, demo_snapshot
@@ -66,9 +67,16 @@ def main() -> None:
                  overtime=[OvertimeGrant(machine_id="IM-05", day=0, minutes=240)]),
         dispatch(after, plan_id="P5", label="依交期重排 + 急單外包", rule="edd", outsourced=["WO-R1"]),
     ]
+    search = optimize(after, policy, plan_id="P6", label="局部搜尋重排(不加班、不外包)", reference=original)
+    plans.append(search.plan)
     evaluations = [evaluate(after, plan, policy, reference=original) for plan in plans]
     for plan, ev in zip(plans, evaluations):
         print_summary(ev, plan.label)
+
+    print(
+        f"  (P6 自 {search.start_rule} 法則出發,改進 {search.moves} 步,試算 {search.evaluations} 個方案,"
+        f"{'已達局部最佳' if search.local_optimum else '試算次數用完'})"
+    )
 
     result = rank(evaluations, policy.ranking)
     print("\n== 排序")
