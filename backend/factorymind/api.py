@@ -7,11 +7,15 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .governance import GovernanceError, Incident, VirtualFactory
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")  # backend/.env:AI 金鑰等設定
 
 factory = VirtualFactory(
     first_event_delay_s=float(os.environ.get("FACTORYMIND_FIRST_EVENT_S", 5)),
@@ -51,6 +55,10 @@ class Approval(Actor):
 
 class Rejection(Actor):
     reason: str = ""
+
+
+class Question(Actor):
+    question: str
 
 
 def _guard(action):
@@ -116,3 +124,8 @@ def reassess(incident_id: str, body: Actor) -> dict:
 def confirm_task(incident_id: str, task_id: str, body: Actor) -> dict:
     body.actor = body.actor if body.actor != "生產主管" else "維修確認者"
     return _guard(lambda: factory.confirm_task(incident_id, task_id, body.actor)).model_dump(mode="json")
+
+
+@app.post("/api/incidents/{incident_id}/ask")
+def ask(incident_id: str, body: Question) -> dict:
+    return _guard(lambda: factory.ask(incident_id, body.question, body.actor)).model_dump(mode="json")

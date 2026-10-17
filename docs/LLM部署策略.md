@@ -52,4 +52,4 @@ FactoryMind 的分工讓模型的責任很窄:
 
 ## 現階段
 
-底層(虛擬工廠、試跑、硬規則、排序)完全不呼叫模型,可先行開發與測試;模型於治理主線完成後再接入。
+底層(虛擬工廠、試跑、硬規則、排序)完全不呼叫模型。目前已接入報告角色(主管摘要)與主管問答,經 `backend/factorymind/llm.py` 以 OpenAI 相容介面呼叫 Gemini;改用地端時設定 `FACTORYMIND_LLM_BASE_URL` 指向 vLLM 即可(見 `backend/.env.example`)。
