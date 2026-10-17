@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AiPanel from "./AiPanel";
 import Gantt from "./Gantt";
 import { Legend } from "./Overview";
 import { api } from "@/lib/api";
@@ -214,7 +215,17 @@ function DecisionPanel({
   );
 }
 
-export default function IncidentView({ incident, policy, act }: { incident: Incident; policy: Policy; act: Act }) {
+export default function IncidentView({
+  incident,
+  policy,
+  aiEnabled,
+  act,
+}: {
+  incident: Incident;
+  policy: Policy;
+  aiEnabled: boolean;
+  act: Act;
+}) {
   const fallback = incident.applied_plan_id ?? incident.ranking?.winner ?? incident.plans[0]?.id ?? ORIGINAL;
   const [selected, setSelected] = useState(fallback);
   // 換事件、重新評估或套用後,回到該看的那個方案
@@ -325,6 +336,8 @@ export default function IncidentView({ incident, policy, act }: { incident: Inci
           </button>
         </div>
       )}
+
+      <AiPanel incident={incident} aiEnabled={aiEnabled} />
 
       {incident.tasks.some((t) => !t.done) && incident.applied_plan_id && (
         <section className="card">

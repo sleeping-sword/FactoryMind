@@ -91,6 +91,12 @@ export default function App() {
           <h1>{state.snapshot.factory_id === "demo-injection-plant" ? "示範射出廠" : state.snapshot.factory_id}</h1>
         </div>
         <div className="controls">
+          <span
+            className={`chip ${state.ai.enabled ? "good" : ""}`}
+            title={state.ai.enabled ? `${state.ai.provider}・${state.ai.model}` : "在 backend/.env 填入 GEMINI_API_KEY 後重啟後端"}
+          >
+            {state.ai.enabled ? "✦ AI 已啟用" : "AI 未設定"}
+          </span>
           <span className={`chip ${state.running ? "good" : ""}`}>{state.running ? "● 運轉中" : "‖ 已暫停"}</span>
           {state.running ? (
             <button type="button" onClick={() => act(api.pause)}>暫停</button>
@@ -152,7 +158,7 @@ export default function App() {
           {selected === null || !summary ? (
             <Overview state={state} onOpen={setSelected} />
           ) : incident && incident.id === selected ? (
-            <IncidentView incident={incident} policy={state.policy} act={act} />
+            <IncidentView incident={incident} policy={state.policy} aiEnabled={state.ai.enabled} act={act} />
           ) : (
             <section className="card empty"><h2>讀取事件中…</h2></section>
           )}

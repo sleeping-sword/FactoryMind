@@ -31,14 +31,15 @@ def _validate(snapshot: FactorySnapshot, plan: Plan) -> list[str]:
     return errors
 
 
-def _changed_count(plan: Plan, operations: list[Operation], reference: Evaluation) -> int:
-    """改動既有工單數:機台或排定時間改變、或改為外包,各工單計一次。新急單不在對照排程內,不計。"""
+def changed_work_orders(outsourced: list[str], operations: list[Operation], reference: Evaluation) -> list[str]:
+    """改動的既有工單:機台或排定時間改變、或改為外包、或取消外包。新急單不在對照排程內,不計。"""
     now = {op.work_order_id: (op.machine_id, op.start_min) for op in operations}
-    changed = 0
-    for ref in reference.operations:
-        if ref.work_order_id in plan.outsourced or now.get(ref.work_order_id) != (ref.machine_id, ref.start_min):
-            changed += 1
-    return changed + sum(1 for wo_id in reference.outsourced if wo_id not in plan.outsourced)
+    changed = [
+        ref.work_order_id
+        for ref in reference.operations
+        if ref.work_order_id in outsourced or now.get(ref.work_order_id) != (ref.machine_id, ref.start_min)
+    ]
+    return changed + [wo_id for wo_id in reference.outsourced if wo_id not in outsourced]
 
 
 def evaluate(
@@ -111,7 +112,7 @@ def evaluate(
         ),
         total_tardiness_min=sum(tardiness.values()),
         late_work_orders=sorted(w for w, t in tardiness.items() if t > 0),
-        changed_work_orders=_changed_count(plan, operations, reference) if reference else None,
+        changed_work_orders=len(changed_work_orders(plan.outsourced, operations, reference)) if reference else None,
         cost_ntd=sum(costs.values()),
         cost_breakdown_ntd=costs,
         mold_changes=sum(1 for op in operations if op.mold_changed),

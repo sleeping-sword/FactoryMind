@@ -173,6 +173,25 @@ export interface TraceEntry {
   message: string;
 }
 
+export interface AiBrief {
+  headline: string;
+  reasons: string[];
+  watch: string[];
+  source: "ai" | "rules";
+  model: string | null;
+  note: string | null;
+  at: string;
+}
+
+export interface ChatTurn {
+  question: string;
+  answer: string;
+  source: "ai" | "rules";
+  model: string | null;
+  actor: string;
+  at: string;
+}
+
 export interface Incident {
   id: string;
   title: string;
@@ -193,6 +212,8 @@ export interface Incident {
   tasks: Task[];
   trace: TraceEntry[];
   error: string | null;
+  ai_brief: AiBrief | null;
+  chat: ChatTurn[];
 }
 
 export interface IncidentSummary {
@@ -207,6 +228,7 @@ export interface IncidentSummary {
 export interface FactoryState {
   revision: number;
   running: boolean;
+  ai: { enabled: boolean; provider: string; model: string };
   snapshot: Snapshot;
   policy: Policy;
   schedule: { version: number; plan: Plan; evaluation: Evaluation; still_valid: boolean };

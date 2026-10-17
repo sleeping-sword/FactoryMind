@@ -281,3 +281,22 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .machine-cards details { font-size: 13px; }
 .machine-cards summary { cursor: pointer; color: var(--ink-2); }
 .machine-cards details ul { display: grid; gap: 2px; margin-top: 4px; }
+
+/* ── AI 摘要與問答 ─────────────────────── */
+.ai { border-left: 4px solid var(--series-normal); display: grid; gap: 10px; }
+.ai .card-head { margin-bottom: 0; }
+.ai h2 { font-size: 17px; }
+.watch { display: grid; gap: 4px; font-size: 13px; }
+.watch li::before { content: "⚠ "; color: var(--warning); }
+.ask > summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
+.ask[open] { display: grid; gap: 10px; }
+.ask[open] > summary { margin-bottom: 2px; }
+.chat { display: grid; gap: 10px; }
+.chat li { display: grid; gap: 4px; }
+.q { font-weight: 600; font-size: 13px; }
+.q::before { content: "問 "; color: var(--muted); font-weight: 400; }
+.a { font-size: 14px; white-space: pre-wrap; }
+.a.muted { color: var(--ink-2); }
+.ask-form { display: flex; gap: 8px; }
+.ask-form input { flex: 1; min-width: 0; font: inherit; padding: 6px 10px; border: 1px solid var(--axis); border-radius: 8px; background: var(--surface); color: var(--ink); }
+button:disabled { opacity: 0.5; cursor: default; }
