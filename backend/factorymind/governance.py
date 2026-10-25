@@ -132,6 +132,7 @@ def _now() -> str:
 
 
 SYSTEM = "系統"
+MAX_REASON_CHARS = 200  # 退回理由上限;前端 lib/format.ts 同步
 
 
 class EventSource:
@@ -189,6 +190,7 @@ class VirtualFactory:
             self.plan: Plan = dispatch(self.snapshot, plan_id="S1", label="原始排程(依交期派工)")
             self.evaluation: Evaluation = evaluate(self.snapshot, self.plan, self.policy)
             self.schedule_version = 1
+            self.schedule_basis = (self.snapshot.version, _now())  # 目前排程指標是用哪版快照、何時算的
             self.incidents: list[Incident] = []
             self.source = EventSource()
             self.running = False
@@ -426,6 +428,7 @@ class VirtualFactory:
             )
             self.plan, self.evaluation = plan, fresh
             self.schedule_version += 1
+            self.schedule_basis = (self.snapshot.version, _now())
             incident.applied_plan_id = plan_id
             incident.log(
                 Stage.REPORT, SYSTEM,
@@ -442,6 +445,13 @@ class VirtualFactory:
             incident = self._get(incident_id)
             if incident.status != Status.AWAITING_APPROVAL:
                 raise GovernanceError("這個事件目前沒有等待核准的建議")
+            actor, reason = actor.strip(), reason.strip()
+            if not actor:
+                raise GovernanceError("請填寫操作者")
+            if not reason:
+                raise GovernanceError("請填寫退回理由")
+            if len(reason) > MAX_REASON_CHARS:
+                raise GovernanceError(f"退回理由請在 {MAX_REASON_CHARS} 字內")
             incident.decisions.append(
                 Decision(
                     kind="rejected", plan_id=incident.ranking.winner if incident.ranking else None, actor=actor,
@@ -450,7 +460,7 @@ class VirtualFactory:
                 )
             )
             incident.status = Status.REJECTED
-            incident.log(Stage.DECIDE, actor, f"退回系統建議{f',理由:{reason}' if reason else ''}。工廠未被改動。")
+            incident.log(Stage.DECIDE, actor, f"退回系統建議,理由:{reason}。工廠未被改動。")
             self.revision += 1
             return incident
 
@@ -513,6 +523,8 @@ class VirtualFactory:
                     "plan": self.plan.model_dump(mode="json"),
                     "evaluation": self.evaluation.model_dump(mode="json"),
                     "still_valid": evaluate(self.snapshot, self.plan, self.policy).eligible,
+                    "computed_on_snapshot": self.schedule_basis[0],
+                    "computed_at": self.schedule_basis[1],
                 },
                 "incidents": [
                     {

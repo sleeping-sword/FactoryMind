@@ -231,6 +231,14 @@ export interface FactoryState {
   ai: { enabled: boolean; provider: string; model: string };
   snapshot: Snapshot;
   policy: Policy;
-  schedule: { version: number; plan: Plan; evaluation: Evaluation; still_valid: boolean };
+  schedule: {
+    version: number;
+    plan: Plan;
+    evaluation: Evaluation;
+    still_valid: boolean;
+    /** 指標是用哪一版快照、何時算的 */
+    computed_on_snapshot: number;
+    computed_at: string;
+  };
   incidents: IncidentSummary[];
 }

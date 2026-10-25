@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ApiError, api } from "@/lib/api";
+import { timeOfDay } from "@/lib/format";
 import type { Incident } from "@/lib/types";
 
 const QUICK = ["為什麼選這個方案?", "其他方案差在哪?", "不處理會怎樣?"];
@@ -13,6 +14,8 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
   const [error, setError] = useState<string | null>(null);
   const brief = incident.ai_brief;
   if (!brief) return null;
+  // 摘要寫於決策前;套用後保留原文當歷史,不隨後續進度改寫
+  const historical = incident.applied_plan_id !== null;
 
   async function ask(question: string) {
     if (!question.trim() || pending) return;
@@ -29,6 +32,7 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
 
   return (
     <section className="card ai">
+      {historical && <p className="eyebrow">決策當時的摘要・{timeOfDay(brief.at)}</p>}
       <header className="card-head split">
         <h2>{brief.headline}</h2>
         <span
@@ -46,7 +50,7 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
         </ul>
       )}
       {brief.watch.length > 0 && (
-        <ul className="watch">
+        <ul className={`watch${historical ? " past" : ""}`}>
           {brief.watch.map((w) => (
             <li key={w}>{w}</li>
           ))}

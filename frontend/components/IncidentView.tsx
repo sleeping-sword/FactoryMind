@@ -6,6 +6,7 @@ import Gantt from "./Gantt";
 import { Legend } from "./Overview";
 import { api } from "@/lib/api";
 import {
+  MAX_REASON_CHARS,
   METRIC_LABEL,
   MIN_PER_DAY,
   STAGES,
@@ -92,9 +93,17 @@ function DecisionPanel({
   const ok = eligible(evaluation);
   const canDecide = incident.status === "awaiting_approval" || incident.status === "rejected";
   const changes = changesOf(incident, evaluation);
+  // 口徑:既有工單改動(排序指標,不含新單)+ 新排入 = 本次變更
+  const added = changes.filter((c) => c.from === "尚未排入").length;
+  const existing = evaluation.kpis?.changed_work_orders ?? changes.length - added;
+  const tally = `既有 ${existing} + 新排 ${added} = ${existing + added} 張`;
+  const applied = incident.applied_plan_id === plan.id;
   const needsSignoff = plan.overtime.length > 0 || plan.outsourced.length > 0;
 
   const k = evaluation.kpis;
+  const trimmed = reason.trim().length;
+  const reasonProblem =
+    trimmed === 0 ? "請寫下退回原因" : trimmed > MAX_REASON_CHARS ? `超過 ${trimmed - MAX_REASON_CHARS} 字,請刪減到 ${MAX_REASON_CHARS} 字內` : null;
 
   return (
     <div className={`decision ${recommended ? "good" : ok ? "" : "critical"}`}>
@@ -103,6 +112,7 @@ function DecisionPanel({
           {recommended ? "✓ 系統建議" : ok ? "可選" : "✕ 不能採用"}
         </span>
         {plan.id}・{plan.label}
+        {ok && <span className={`chip ${applied ? "good" : ""}`}>{applied ? "已套用" : "試算・未套用"}</span>}
       </h3>
 
       {ok && k ? (
@@ -116,8 +126,10 @@ function DecisionPanel({
             <dd>{k.late_work_orders.length} <small>張</small></dd>
           </div>
           <div>
-            <dt>改動工單</dt>
-            <dd>{k.changed_work_orders ?? "—"} <small>張</small></dd>
+            <dt>改動既有工單</dt>
+            <dd>
+              {existing} <small>張{added > 0 && `・另新排 ${added}`}</small>
+            </dd>
           </div>
           <div>
             <dt>額外成本</dt>
@@ -142,7 +154,7 @@ function DecisionPanel({
 
       {ok && (
         <details className="changes">
-          <summary>會改動 {changes.length} 張工單</summary>
+          <summary className="changes-sum">變更明細:{tally}</summary>
           <div className="table-scroll">
             <table>
               <thead>
@@ -183,7 +195,7 @@ function DecisionPanel({
       {mode === "approve" && (
         <div className="confirm" role="group" aria-label="確認核准">
           <p>
-            核准 <b>{plan.id}</b>,改動 {changes.length} 張工單?{!recommended && "(非系統建議,會記入紀錄)"}
+            核准 <b>{plan.id}</b>({tally})?{!recommended && "(非系統建議,會記入紀錄)"}
           </p>
           <div className="actions">
             <button type="button" className="primary" onClick={() => act(() => api.approve(incident.id, plan.id))}>
@@ -198,11 +210,26 @@ function DecisionPanel({
       {mode === "reject" && (
         <div className="confirm" role="group" aria-label="確認退回">
           <label>
-            退回原因
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="例如:這週不希望動到這麼多工單" />
+            退回原因(必填)
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="例如:這週不希望動到這麼多工單"
+              aria-invalid={reasonProblem !== null}
+              aria-describedby="reason-hint"
+            />
           </label>
+          <p id="reason-hint" className={`field-hint${reason.trim().length > MAX_REASON_CHARS ? " bad" : ""}`}>
+            {reasonProblem ?? `${reason.trim().length} / ${MAX_REASON_CHARS} 字`}
+          </p>
           <div className="actions">
-            <button type="button" className="danger" onClick={() => act(() => api.reject(incident.id, reason.trim()))}>
+            <button
+              type="button"
+              className="danger"
+              disabled={reasonProblem !== null}
+              onClick={() => act(() => api.reject(incident.id, reason.trim()))}
+            >
               確認退回
             </button>
             <button type="button" onClick={() => setMode("idle")}>
@@ -337,6 +364,21 @@ export default function IncidentView({
         </div>
       )}
 
+      {incident.tasks.some((t) => t.done) && (
+        <section className="card">
+          <ul className="tasks">
+            {incident.tasks.filter((t) => t.done).map((task) => (
+              <li key={task.id}>
+                <b>✓ {task.subject} 已復機</b>
+                <span>
+                  {task.done_by}・{timeOfDay(task.done_at!)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <AiPanel incident={incident} aiEnabled={aiEnabled} />
 
       {incident.tasks.some((t) => !t.done) && incident.applied_plan_id && (
@@ -414,7 +456,9 @@ export default function IncidentView({
 
       <section className="card">
         <header className="card-head split">
-          <h2>{viewingOriginal ? "事件前的排程" : `${plan!.id} 排程預覽`}</h2>
+          <h2>
+            {viewingOriginal ? "事件前基準" : `${plan!.id} ${incident.applied_plan_id === plan!.id ? "已套用" : "試算預覽・未套用"}`}
+          </h2>
           {incident.plans.length > 0 && (
             <div className="toggle" role="group" aria-label="切換排程">
               <button type="button" aria-pressed={!viewingOriginal} onClick={() => setSelected(fallback === ORIGINAL ? incident.plans[0].id : fallback)}>

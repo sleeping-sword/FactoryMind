@@ -1,6 +1,8 @@
 import type { Elimination, Evaluation, Metric, OvertimeGrant, Snapshot, Stage, Status } from "./types";
 
 export const MIN_PER_DAY = 1440;
+/** 退回理由上限;與後端 governance.MAX_REASON_CHARS 相同。 */
+export const MAX_REASON_CHARS = 200;
 
 export const METRIC_LABEL: Record<Metric, string> = {
   strategic_tardiness_min: "策略客戶延誤",

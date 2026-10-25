@@ -1,7 +1,7 @@
 import pytest
 
 from factorymind.events import FactoryEvent
-from factorymind.governance import EventSource, GovernanceError, Stage, Status, VirtualFactory
+from factorymind.governance import MAX_REASON_CHARS, EventSource, GovernanceError, Stage, Status, VirtualFactory
 from factorymind.scenarios.demo import demo_rush_order, demo_snapshot
 
 
@@ -110,3 +110,33 @@ def test_event_source_is_deterministic():
         return [[(e.type, e.subject) for e in source.next(snapshot)] for _ in range(6)]
 
     assert titles() == titles()
+
+
+@pytest.mark.parametrize("reason", ["", "   ", "x" * (MAX_REASON_CHARS + 1)])
+def test_rejection_needs_a_reason_within_the_limit(reason):
+    factory = VirtualFactory()
+    incident = main_scenario(factory)
+    with pytest.raises(GovernanceError, match="理由"):
+        factory.reject(incident.id, "王主管", reason)
+    assert incident.status == Status.AWAITING_APPROVAL and incident.decisions == []
+
+
+def test_rejection_needs_an_actor_and_keeps_the_trimmed_reason():
+    factory = VirtualFactory()
+    incident = main_scenario(factory)
+    with pytest.raises(GovernanceError, match="操作者"):
+        factory.reject(incident.id, "  ", "交期不能接受")
+    factory.reject(incident.id, "王主管", "  交期不能接受  ")
+    assert (incident.decisions[-1].actor, incident.decisions[-1].reason) == ("王主管", "交期不能接受")
+
+
+def test_schedule_metrics_say_which_snapshot_they_were_computed_on():
+    factory = VirtualFactory()
+    incident = main_scenario(factory)
+    schedule = factory.state()["schedule"]
+    assert schedule["computed_on_snapshot"] == 1 < factory.snapshot.version
+    assert schedule["computed_at"] and not schedule["still_valid"]
+
+    factory.approve(incident.id, "P3", "王主管")
+    schedule = factory.state()["schedule"]
+    assert schedule["computed_on_snapshot"] == factory.snapshot.version and schedule["still_valid"]
