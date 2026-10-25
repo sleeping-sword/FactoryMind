@@ -1,7 +1,8 @@
 """AI 角色:報告(事件摘要)與主管問答。
 
-模型只負責把系統算好的結果講成白話,不產生數字、不排序、不能核准。所有回答都先經過數字檢查:
-出現資料裡沒有的數字就視為捏造,要求重寫;仍不合格就退回規則產生的文字,並標示來源。
+模型只負責把系統算好的結果講成白話,不產生數字、不排序、不能核准。方案指標一律以證據標記 [E01]
+引用,先核對方案、指標、值與單位(見 evidence.py);其他數字必須出自事件資料。不合格就要求重寫,
+仍不合格就退回規則產生的文字,並標示來源。
 """
 
 import re
@@ -10,18 +11,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .evidence import MARKER, METRIC_LABEL, Citation, Evidence, check_text, clock, duration, ntd, show
 from .llm import LLMClient, LLMError
-from .models import MIN_PER_DAY, CustomerTier, by_id
+from .models import CustomerTier, by_id
 from .evaluate import changed_work_orders
 from .plan import Evaluation
 from .policy import Policy
 
-METRIC_LABEL = {
-    "strategic_tardiness_min": "策略客戶延誤",
-    "total_tardiness_min": "總延誤",
-    "changed_work_orders": "改動工單數",
-    "cost_ntd": "額外成本",
-}
 COST_LABEL = {"overtime": "加班", "outsourcing": "外包", "setup": "換模"}
 STATUS_LABEL = {
     "processing": "系統處理中",
@@ -37,7 +33,10 @@ STATUS_LABEL = {
 SYSTEM_PROMPT = """你是 FactoryMind 的報告助理,對象是塑膠射出廠的生產主管,不是工程師。
 - 用繁體中文、白話、短句,避免指標欄位名與英文代碼(方案、工單、機台編號可以用)。
 - 只根據提供的「事件資料」回答;資料裡沒有的就直說不知道,不要推測故障原因或復機時間。
-- 數字只能照抄資料中出現的寫法(包含單位與時間格式),不可自行換算、加總或估計。
+- 方案的指標(策略客戶延誤、總延誤、改動既有工單數、額外成本)不要直接寫數字,一律寫證據標記,例如「P3 額外成本 [E12]」;
+  標記要緊接在它所屬的方案後面,並把每個用到的標記照證據表抄進 citations(方案、指標鍵、值、單位都要相同)。
+- 其他數字只能照抄資料中出現的寫法,不可自行換算、加總或估計。
+- 比較方案時講清楚是在哪些方案之間比較;「合規但順位落選」不是「違規」。
 - 方案的計算、硬規則檢核與排序都由系統完成;你不能核准、退回或修改方案,也不能放寬規則。
 - 主管要採取行動時,提醒他用畫面上的按鈕。"""
 
@@ -51,6 +50,7 @@ class AiBrief(BaseModel):
     source: Literal["ai", "rules"]
     model: str | None = None
     note: str | None = Field(default=None, description="沒用到 AI 的原因")
+    evidence: list[Evidence] = Field(default=[], description="文字裡 [Exx] 標記對應的證據,保留當時版本")
     at: str
 
 
@@ -59,6 +59,7 @@ class ChatTurn(BaseModel):
     answer: str
     source: Literal["ai", "rules"]
     model: str | None = None
+    evidence: list[Evidence] = []
     actor: str
     at: str
 
@@ -67,31 +68,12 @@ class _Brief(BaseModel):
     headline: str = Field(description="一句話,25 字內,說建議主管做什麼")
     reasons: list[str] = Field(max_length=3, description="最多 3 點:為什麼選它、其他方案為何落選")
     watch: list[str] = Field(max_length=3, description="最多 3 點:核准前要注意的事,沒有就給空陣列")
+    citations: list[Citation] = Field(default=[], description="文字中每個 [Exx] 標記,照證據表抄")
 
 
 class _Answer(BaseModel):
     answer: str = Field(description="給主管的回答,150 字內")
-
-
-# ── 給人看的格式,與前端 lib/format.ts 一致 ─────────────────────
-
-def clock(minute: int) -> str:
-    day, rest = divmod(minute, MIN_PER_DAY)
-    return f"D{day} {rest // 60:02d}:{rest % 60:02d}"
-
-
-def duration(minutes: float) -> str:
-    minutes = int(minutes)
-    if minutes == 0:
-        return "0 分"
-    hours, rest = divmod(minutes, 60)
-    if hours == 0:
-        return f"{rest} 分"
-    return f"{hours:,} 小時 {rest} 分" if rest else f"{hours:,} 小時"
-
-
-def ntd(value: float) -> str:
-    return f"NT${round(value):,}"
+    citations: list[Citation] = Field(default=[], description="回答中每個 [Exx] 標記,照證據表抄")
 
 
 def _now() -> str:
@@ -100,17 +82,28 @@ def _now() -> str:
 
 # ── 事件資料:模型看得到的全部內容 ──────────────────────────────
 
-def _outcome(ev: Evaluation) -> str:
+class _Ref:
+    """(方案, 指標) → 證據標記。"""
+
+    def __init__(self, evidence: list[Evidence]):
+        self.by_key = {(e.plan_id, e.metric): e for e in evidence}
+
+    def __call__(self, plan_id: str, metric: str) -> str:
+        e = self.by_key.get((plan_id, metric))
+        return f"[{e.id}]" if e else "(無證據)"
+
+
+def _outcome(ev: Evaluation, ref: _Ref) -> str:
     k = ev.kpis
     if k is None:
         return "無指標"
     costs = "、".join(f"{COST_LABEL.get(key, key)} {ntd(v)}" for key, v in k.cost_breakdown_ntd.items() if v > 0)
+    late = f",逾期工單 {'、'.join(k.late_work_orders)}" if k.late_work_orders else ""
     parts = [
-        "策略客戶全部準時" if k.strategic_tardiness_min == 0 else f"策略客戶延誤 {duration(k.strategic_tardiness_min)}",
-        "沒有逾期訂單" if not k.late_work_orders
-        else f"逾期 {len(k.late_work_orders)} 張({'、'.join(k.late_work_orders)}),合計延誤 {duration(k.total_tardiness_min)}",
-        f"改動既有工單 {k.changed_work_orders} 張" if k.changed_work_orders is not None else "",
-        f"額外成本 {ntd(k.cost_ntd)}" + (f"({costs})" if costs else ""),
+        f"策略客戶延誤 {ref(ev.plan_id, 'strategic_tardiness_min')}",
+        f"總延誤 {ref(ev.plan_id, 'total_tardiness_min')}{late}",
+        f"改動既有工單 {ref(ev.plan_id, 'changed_work_orders')}" if k.changed_work_orders is not None else "",
+        f"額外成本 {ref(ev.plan_id, 'cost_ntd')}" + (f"(含{costs})" if "、" in costs else ""),
     ]
     return ";".join(p for p in parts if p)
 
@@ -132,15 +125,20 @@ def _changes(ev: Evaluation, reference: Evaluation) -> str:
     return "改動的工單:" + "、".join(parts) if parts else "不改動既有工單"
 
 
-def _elimination(e) -> str:
+def _elimination(e, ref: _Ref, winner: str | None = None) -> str:
+    """以 e.plan_id 開頭;順位落選寫明該輪比較集合,硬規則淘汰標明不合規。同為最佳時優先舉出系統建議的方案。"""
     if e.stage in METRIC_LABEL and e.value is not None and e.best is not None:
-        fmt = ntd if e.stage == "cost_ntd" else (lambda v: f"{int(v)} 張") if e.stage == "changed_work_orders" else duration
-        allowed = f",容許差距 {fmt(e.threshold)}" if e.threshold else ""
-        return f"比較「{METRIC_LABEL[e.stage]}」時落選:它是 {fmt(e.value)},最好的方案是 {fmt(e.best)}{allowed}"
-    return f"{e.stage}不通過:{e.reason}"
+        pool = sorted(e.pool, key=lambda p: p != winner)
+        leader = next(p for p in pool if (ev := ref.by_key.get((p, e.stage))) and ev.value == e.best)
+        allowed = f",差距超過容許的 {show(e.stage, e.threshold)}" if e.threshold else ""
+        return (
+            f"{e.plan_id} 合規,但在 {'、'.join(e.pool)} 之間比較「{METRIC_LABEL[e.stage]}」時落選:"
+            f"{e.plan_id} 是 {ref(e.plan_id, e.stage)},這輪最好的 {leader} 是 {ref(leader, e.stage)}{allowed}"
+        )
+    return f"{e.plan_id} {e.stage}不通過(不合規):{e.reason}"
 
 
-def build_facts(incident, policy: Policy) -> str:
+def build_facts(incident, policy: Policy, evidence: list[Evidence]) -> str:
     """把事件單整理成白話的事件資料。incident 為 governance.Incident;呼叫端需持有鎖。"""
     snap = incident.snapshot
     machines, products, customers = by_id(snap.machines), by_id(snap.products), by_id(snap.customers)
@@ -171,6 +169,7 @@ def build_facts(incident, policy: Policy) -> str:
         f"加班預算 {ntd(policy.hard_limits.overtime_budget_ntd)};模具需符合機台噸數、停機機台不可排、缺料不可排。"
     )
 
+    ref = _Ref(evidence)
     lines += ["", f"## 候選方案(共 {len(incident.plans)} 個,已在虛擬工廠試跑)"]
     eliminated = {e.plan_id: e for e in (incident.ranking.eliminated if incident.ranking else [])}
     evaluations = {ev.plan_id: ev for ev in incident.evaluations}
@@ -185,8 +184,8 @@ def build_facts(incident, policy: Policy) -> str:
             extras.append("外包 " + "、".join(plan.outsourced))
         verdict = "系統建議" if incident.ranking and incident.ranking.winner == plan.id else ""
         if plan.id in eliminated:
-            verdict = _elimination(eliminated[plan.id])
-        lines.append(f"- {plan.id}「{plan.label}」:{_outcome(ev)}" + (f";{','.join(extras)}" if extras else "") + (f"。{verdict}" if verdict else ""))
+            verdict = _elimination(eliminated[plan.id], ref, incident.ranking.winner)
+        lines.append(f"- {plan.id}「{plan.label}」:{_outcome(ev, ref)}" + (f";{','.join(extras)}" if extras else "") + (f"。{verdict}" if verdict else ""))
         if ev.kpis is not None:
             lines.append(f"  {_changes(ev, incident.reference)}")
     if incident.ranking:
@@ -194,6 +193,10 @@ def build_facts(incident, policy: Policy) -> str:
             lines.append(f"系統未選出方案:{incident.ranking.undecided_reason}")
         if incident.ranking.tie_break:
             lines.append(f"同分處理:{incident.ranking.tie_break}")
+
+    if evidence:
+        lines += ["", "## 證據表(方案指標只能用這些標記引用)"]
+        lines += [f"- [{e.id}] {e.label} = {e.display}(指標鍵 {e.metric},值 {e.value:g},單位 {e.unit})" for e in evidence]
 
     if incident.decisions:
         lines += ["", "## 主管已做的決定"]
@@ -206,23 +209,31 @@ def build_facts(incident, policy: Policy) -> str:
     return "\n".join(lines)
 
 
-def rule_brief(incident, note: str | None = None) -> AiBrief:
+def _cited(texts: list[str], evidence: list[Evidence]) -> list[Evidence]:
+    used = {m for t in texts for m in MARKER.findall(t)}
+    return [e for e in evidence if e.id in used]
+
+
+def rule_brief(incident, evidence: list[Evidence], note: str | None = None) -> AiBrief:
     """不用模型的摘要;AI 關閉或失敗時使用。"""
     ranking = incident.ranking
     plans = {p.id: p for p in incident.plans}
     evaluations = {ev.plan_id: ev for ev in incident.evaluations}
+    ref = _Ref(evidence)
     if ranking is None or ranking.winner is None:
-        reasons = [f"{e.plan_id}:{_elimination(e)}" for e in (ranking.eliminated if ranking else [])][:3]
-        return AiBrief(headline="沒有合規的方案,需要你調整條件", reasons=reasons, source="rules", note=note, at=_now())
+        reasons = [_elimination(e, ref) for e in (ranking.eliminated if ranking else [])][:3]
+        return AiBrief(headline="沒有合規的方案,需要你調整條件", reasons=reasons, source="rules", note=note,
+                       evidence=_cited(reasons, evidence), at=_now())
     plan = plans[ranking.winner]
-    reasons = [_outcome(evaluations[plan.id])]
-    reasons += [f"{e.plan_id}:{_elimination(e)}" for e in ranking.eliminated][:2]
+    reasons = [f"{plan.id}:{_outcome(evaluations[plan.id], ref)}"]
+    reasons += [_elimination(e, ref, plan.id) for e in ranking.eliminated][:2]
     watch = []
     if plan.overtime or plan.outsourced:
         watch.append("含加班或外包,核准後要通知人員或下單")
     if any(not t.done for t in incident.tasks):
         watch.append("停機機台的復機時間未知,修好後要回報")
-    return AiBrief(headline=f"建議採用 {plan.id}「{plan.label}」", reasons=reasons, watch=watch, source="rules", note=note, at=_now())
+    return AiBrief(headline=f"建議採用 {plan.id}「{plan.label}」", reasons=reasons, watch=watch, source="rules", note=note,
+                   evidence=_cited(reasons, evidence), at=_now())
 
 
 # ── 數字檢查 ─────────────────────────────────────────────────
@@ -237,14 +248,34 @@ def _numbers(text: str) -> set[str]:
 def invented_numbers(text: str, facts: str) -> list[str]:
     """回答裡出現、但事件資料裡沒有的數字。個位數(第一、兩點之類)不算。"""
     allowed = _numbers(facts)
+    text = MARKER.sub(" ", text)
     return sorted(n for n in _numbers(text) if n not in allowed and not (n.isdigit() and int(n) < 10))
 
 
-def _number_check(facts: str):
-    def check(result: BaseModel) -> str | None:
-        text = " ".join(str(v) for v in result.model_dump().values())
-        bad = invented_numbers(text, facts)
-        return f"出現事件資料裡沒有的數字 {'、'.join(bad)},只能照抄資料中的數字" if bad else None
+# 系統沒有故障原因資料:問原因一律固定回答;模型自己講出原因也不採用
+_CAUSE_QUESTION = re.compile(r"(停機|故障|壞|異常|IM-\d+).{0,10}原因|原因.{0,6}(停機|故障|壞)|為什麼.{0,8}(停機|壞|故障)|怎麼壞|哪裡壞")
+_CAUSE_CLAIM = re.compile(
+    r"(停機|故障|壞掉?)的?原因(是|為|在於)"
+    r"|(老化|磨損|過熱|漏油|漏水|堵塞|斷裂|短路|卡模|螺桿|加熱圈|液壓|電路|感測器).{0,10}(停機|故障|壞|導致)"
+)
+UNKNOWN_CAUSE = "停機原因目前未知,待維修確認:系統沒有故障原因資料,不會推測原因。"
+
+
+def _texts(result: BaseModel) -> list[str]:
+    if isinstance(result, _Brief):
+        return [result.headline, *result.reasons, *result.watch]
+    return [result.answer]
+
+
+def _evidence_check(facts: str, evidence: list[Evidence]):
+    def check(result: _Brief | _Answer) -> str | None:
+        texts = _texts(result)
+        problems = [p for t in texts for p in check_text(t, result.citations, evidence)]
+        if any(_CAUSE_CLAIM.search(t) for t in texts):
+            problems.append("資料沒有故障原因,不可推測或描述停機原因")
+        if bad := invented_numbers(" ".join(texts), facts):
+            problems.append(f"出現事件資料裡沒有的數字 {'、'.join(bad)},只能照抄資料中的數字")
+        return ";".join(problems) or None
 
     return check
 
@@ -256,7 +287,7 @@ class Advisor:
     def status(self) -> dict:
         return self.client.status()
 
-    def brief(self, facts: str, fallback: AiBrief) -> AiBrief:
+    def brief(self, facts: str, evidence: list[Evidence], fallback: AiBrief) -> AiBrief:
         if not self.client.enabled:
             return fallback
         try:
@@ -264,16 +295,18 @@ class Advisor:
                 SYSTEM_PROMPT,
                 f"事件資料:\n{facts}\n\n請替主管寫這個事件的摘要。",
                 _Brief,
-                check=_number_check(facts),
+                check=_evidence_check(facts, evidence),
             )
         except LLMError as exc:
             return fallback.model_copy(update={"note": str(exc)})
         return AiBrief(
             headline=result.headline, reasons=result.reasons[:3], watch=result.watch[:3],
-            source="ai", model=self.client.config.model, at=_now(),
+            source="ai", model=self.client.config.model, evidence=_cited(_texts(result), evidence), at=_now(),
         )
 
-    def answer(self, facts: str, history: list[ChatTurn], question: str, actor: str) -> ChatTurn:
+    def answer(self, facts: str, evidence: list[Evidence], history: list[ChatTurn], question: str, actor: str) -> ChatTurn:
+        if _CAUSE_QUESTION.search(question):
+            return ChatTurn(question=question, answer=UNKNOWN_CAUSE, source="rules", actor=actor, at=_now())
         if not self.client.enabled:
             return ChatTurn(question=question, answer="AI 尚未啟用:後端沒有設定金鑰。", source="rules", actor=actor, at=_now())
         past = "\n".join(f"主管:{t.question}\n助理:{t.answer}" for t in history[-4:])
@@ -282,8 +315,11 @@ class Advisor:
                 SYSTEM_PROMPT,
                 f"事件資料:\n{facts}\n\n" + (f"先前的對話:\n{past}\n\n" if past else "") + f"主管的問題:{question}",
                 _Answer,
-                check=_number_check(f"{facts}\n{question}"),
+                check=_evidence_check(f"{facts}\n{question}", evidence),
             )
         except LLMError as exc:
             return ChatTurn(question=question, answer=f"{exc}。", source="rules", actor=actor, at=_now())
-        return ChatTurn(question=question, answer=result.answer, source="ai", model=self.client.config.model, actor=actor, at=_now())
+        return ChatTurn(
+            question=question, answer=result.answer, source="ai", model=self.client.config.model,
+            evidence=_cited([result.answer], evidence), actor=actor, at=_now(),
+        )

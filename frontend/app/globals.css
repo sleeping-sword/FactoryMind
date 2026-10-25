@@ -291,6 +291,11 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .watch li::before { content: "⚠ "; color: var(--warning); }
 .watch.past { color: var(--ink-2); }
 .watch.past li::before { content: "當時:"; color: var(--ink-2); }
+/* 證據標記:數字可點,點開顯示來源方案、指標與版本 */
+.ev { border: 0; border-bottom: 1px dashed var(--series-normal); border-radius: 0; background: none; padding: 0 1px; font-size: inherit; font-weight: 600; color: var(--ink); }
+.ev:hover { background: var(--select); }
+.ev-detail { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 13px; color: var(--ink-2); background: var(--select); border-radius: 8px; padding: 6px 10px; }
+.ev-detail strong { color: var(--ink); }
 .field-hint { font-size: 13px; color: var(--ink-2); }
 .field-hint.bad::before { content: "✕ "; color: var(--critical); }
 .ask > summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }

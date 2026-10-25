@@ -173,6 +173,20 @@ export interface TraceEntry {
   message: string;
 }
 
+/** 一筆計算證據;AI 文字裡的 [E12] 標記指向它。 */
+export interface Evidence {
+  id: string;
+  incident_id: string;
+  plan_id: string;
+  metric: Metric;
+  value: number;
+  unit: "分鐘" | "張" | "NT$";
+  display: string;
+  snapshot_version: number;
+  policy_version: string;
+  engine_version: string;
+}
+
 export interface AiBrief {
   headline: string;
   reasons: string[];
@@ -180,6 +194,7 @@ export interface AiBrief {
   source: "ai" | "rules";
   model: string | null;
   note: string | null;
+  evidence: Evidence[];
   at: string;
 }
 
@@ -188,6 +203,7 @@ export interface ChatTurn {
   answer: string;
   source: "ai" | "rules";
   model: string | null;
+  evidence: Evidence[];
   actor: string;
   at: string;
 }

@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from .ai import AiBrief, Advisor, ChatTurn, build_facts, rule_brief
+from .evidence import build_evidence
 from .candidates import generate_candidates
 from .dispatch import dispatch
 from .evaluate import evaluate
@@ -328,8 +329,9 @@ class VirtualFactory:
                 else:
                     incident.status = Status.NO_COMPLIANT_PLAN
                     incident.log(Stage.DECIDE, SYSTEM, f"未選出方案:{ranking.undecided_reason}。交由生產主管處理。")
-                incident.ai_brief = rule_brief(incident)
-                facts, fallback = build_facts(incident, policy), incident.ai_brief
+                evidence = build_evidence(incident)
+                incident.ai_brief = rule_brief(incident, evidence)
+                facts, fallback = build_facts(incident, policy, evidence), incident.ai_brief
                 self.revision += 1
         except Exception as exc:  # 計算失敗要留下紀錄,不可顯示成完成
             with self._lock:
@@ -341,13 +343,13 @@ class VirtualFactory:
 
         # 先用規則摘要讓主管可以決定;AI 摘要寫好再換上,不擋住決策
         if self.advisor.status()["enabled"]:
-            brief = self.advisor.brief(facts, fallback)
+            brief = self.advisor.brief(facts, evidence, fallback)
             with self._lock:
                 if incident.ranking is ranking:  # 期間被重新評估就丟掉舊的摘要
                     incident.ai_brief = brief
                     incident.log(
                         Stage.DECIDE, "報告角色",
-                        f"由 {brief.model} 撰寫主管摘要;摘要中的數字皆已核對出自系統計算。" if brief.source == "ai"
+                        f"由 {brief.model} 撰寫主管摘要;方案指標皆以證據標記引用,已核對方案、指標、值與單位。" if brief.source == "ai"
                         else f"AI 摘要未完成({brief.note}),改用規則產生的摘要。",
                         advance=False,
                     )
@@ -363,8 +365,9 @@ class VirtualFactory:
             raise GovernanceError("問題太長,請精簡到 300 字內")
         with self._lock:
             incident = self._get(incident_id)
-            facts, history = build_facts(incident, self.policy), list(incident.chat)
-        turn = self.advisor.answer(facts, history, question, actor)
+            evidence = build_evidence(incident)
+            facts, history = build_facts(incident, self.policy, evidence), list(incident.chat)
+        turn = self.advisor.answer(facts, evidence, history, question, actor)
         with self._lock:
             incident.chat.append(turn)
             self.revision += 1

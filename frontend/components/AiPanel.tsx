@@ -2,16 +2,52 @@
 
 import { useState } from "react";
 import { ApiError, api } from "@/lib/api";
-import { timeOfDay } from "@/lib/format";
-import type { Incident } from "@/lib/types";
+import { METRIC_LABEL, timeOfDay } from "@/lib/format";
+import type { Evidence, Incident } from "@/lib/types";
 
 const QUICK = ["為什麼選這個方案?", "其他方案差在哪?", "不處理會怎樣?"];
 
-/** AI 摘要與問答。數字一律來自系統計算;AI 只負責講成白話。 */
+/** 把 [E12] 標記換成可點的數字;點了在下方顯示這個數字屬於哪個方案、指標與版本。 */
+function Cited({ text, evidence, onPick }: { text: string; evidence: Evidence[]; onPick: (e: Evidence) => void }) {
+  const byId = new Map(evidence.map((e) => [e.id, e]));
+  return (
+    <>
+      {text.split(/\[(E\d+)\]/).map((part, i) => {
+        const e = i % 2 ? byId.get(part) : undefined;
+        if (!e) return i % 2 ? `[${part}]` : part;
+        return (
+          <button key={i} type="button" className="ev" title={`${e.plan_id} ${METRIC_LABEL[e.metric]}・點看來源`} onClick={() => onPick(e)}>
+            {e.display}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function EvidenceDetail({ e, onClose }: { e: Evidence; onClose: () => void }) {
+  return (
+    <p className="ev-detail" role="status">
+      <strong>
+        {e.plan_id} {METRIC_LABEL[e.metric]} = {e.display}
+      </strong>
+      <span>證據 {e.id}</span>
+      <span>快照 v{e.snapshot_version}</span>
+      <span>政策 {e.policy_version}</span>
+      <span>引擎 {e.engine_version}</span>
+      <button type="button" className="link" onClick={onClose}>
+        關閉
+      </button>
+    </p>
+  );
+}
+
+/** AI 摘要與問答。方案指標一律以證據標記引用、已核對;AI 只負責講成白話。 */
 export default function AiPanel({ incident, aiEnabled }: { incident: Incident; aiEnabled: boolean }) {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Evidence | null>(null);
   const brief = incident.ai_brief;
   if (!brief) return null;
   // 摘要寫於決策前;套用後保留原文當歷史,不隨後續進度改寫
@@ -37,7 +73,7 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
         <h2>{brief.headline}</h2>
         <span
           className={`chip ${brief.source === "ai" ? "good" : ""}`}
-          title={brief.note ?? (brief.source === "ai" ? "數字皆已核對出自系統計算" : undefined)}
+          title={brief.note ?? (brief.source === "ai" ? "方案數字皆已核對方案、指標、單位與版本" : undefined)}
         >
           {brief.source === "ai" ? `✦ AI・${brief.model}` : aiEnabled && !brief.note ? "AI 撰寫中…" : "規則摘要"}
         </span>
@@ -45,17 +81,22 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
       {brief.reasons.length > 0 && (
         <ul className="bullets">
           {brief.reasons.map((r) => (
-            <li key={r}>{r}</li>
+            <li key={r}>
+              <Cited text={r} evidence={brief.evidence} onPick={setPicked} />
+            </li>
           ))}
         </ul>
       )}
       {brief.watch.length > 0 && (
         <ul className={`watch${historical ? " past" : ""}`}>
           {brief.watch.map((w) => (
-            <li key={w}>{w}</li>
+            <li key={w}>
+              <Cited text={w} evidence={brief.evidence} onPick={setPicked} />
+            </li>
           ))}
         </ul>
       )}
+      {picked && <EvidenceDetail e={picked} onClose={() => setPicked(null)} />}
       {brief.source === "rules" && brief.note && <p className="footnote">AI 沒有完成:{brief.note}</p>}
 
       <details className="ask" open={incident.chat.length > 0 || undefined}>
@@ -65,7 +106,9 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
             {incident.chat.map((turn, i) => (
               <li key={i}>
                 <p className="q">{turn.question}</p>
-                <p className={turn.source === "ai" ? "a" : "a muted"}>{turn.answer}</p>
+                <p className={turn.source === "ai" ? "a" : "a muted"}>
+                  <Cited text={turn.answer} evidence={turn.evidence ?? []} onPick={setPicked} />
+                </p>
               </li>
             ))}
           </ol>
