@@ -91,6 +91,8 @@ def replay(snapshot: FactorySnapshot, plan: Plan) -> ReplayResult:
         for m in snapshot.machines
     }
     mold_free_at: dict[str, int] = defaultdict(int)
+    # 產品已試模過的機台;試過一次,同一份排程後面的工單就不用再試
+    proven = {p.id: set(p.proven_machines) for p in snapshot.products if p.proven_machines is not None}
     mold_holder = {m.current_mold_id: m.id for m in snapshot.machines if m.current_mold_id}
     operations: list[Operation] = []
     unfinished: list[str] = []
@@ -105,18 +107,21 @@ def replay(snapshot: FactorySnapshot, plan: Plan) -> ReplayResult:
             wo = work_orders[state.queue[0]]
             product = products[wo.product_id]
             setup = _setup_minutes(snapshot, state, product)
+            trial = snapshot.setup_times.trial_run_min if machine_id not in proven.get(product.id, {machine_id}) else 0
             earliest = max(state.free_at, mold_free_at[product.mold_id])
-            span = consume(state.windows, earliest, setup + run_minutes(wo.remaining, product))
+            span = consume(state.windows, earliest, setup + trial + run_minutes(wo.remaining, product))
             if span is None:
                 unfinished.extend(state.queue)
                 state.queue.clear()
                 continue
             if best is None or span[0] < best[0][0]:
-                best = (span, machine_id, wo, product, setup)
+                best = (span, machine_id, wo, product, setup, trial)
         if best is None:
             break
 
-        (start, end), machine_id, wo, product, setup = best
+        (start, end), machine_id, wo, product, setup, trial = best
+        if product.id in proven:
+            proven[product.id].add(machine_id)
         state = states[machine_id]
         mold_changed = state.mold_id != product.mold_id
         previous_holder = mold_holder.get(product.mold_id)
@@ -135,6 +140,7 @@ def replay(snapshot: FactorySnapshot, plan: Plan) -> ReplayResult:
                 machine_id=machine_id,
                 start_min=start,
                 setup_min=setup,
+                trial_min=trial,
                 end_min=end,
                 mold_changed=mold_changed,
             )

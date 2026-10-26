@@ -74,8 +74,23 @@ export interface Operation {
   machine_id: string;
   start_min: number;
   setup_min: number;
+  /** 第一次上沒試過的機台:試模加首件確認,接在換模之後 */
+  trial_min: number;
   end_min: number;
   mold_changed: boolean;
+}
+
+/** 製程參數出處表的一列;合成資料一律是假設、未經覆核 */
+export interface ProcessParameter {
+  name: string;
+  target: string;
+  value: string;
+  unit: string;
+  source: string;
+  version: string;
+  scope: string;
+  assumption: boolean;
+  status: string;
 }
 
 export interface Kpis {
@@ -163,6 +178,7 @@ export interface Decision {
   at: string;
   reason: string;
   followed_recommendation: boolean | null;
+  request_id: string | null;
 }
 
 export interface TraceEntry {
@@ -173,6 +189,20 @@ export interface TraceEntry {
   message: string;
 }
 
+/** 一筆計算證據;AI 文字裡的 [E12] 標記指向它。 */
+export interface Evidence {
+  id: string;
+  incident_id: string;
+  plan_id: string;
+  metric: Metric;
+  value: number;
+  unit: "分鐘" | "張" | "NT$";
+  display: string;
+  snapshot_version: number;
+  policy_version: string;
+  engine_version: string;
+}
+
 export interface AiBrief {
   headline: string;
   reasons: string[];
@@ -180,6 +210,7 @@ export interface AiBrief {
   source: "ai" | "rules";
   model: string | null;
   note: string | null;
+  evidence: Evidence[];
   at: string;
 }
 
@@ -188,6 +219,7 @@ export interface ChatTurn {
   answer: string;
   source: "ai" | "rules";
   model: string | null;
+  evidence: Evidence[];
   actor: string;
   at: string;
 }
@@ -200,6 +232,7 @@ export interface Incident {
   status: Status;
   stage: Stage;
   snapshot: Snapshot;
+  schedule_version: number;
   policy_version: string;
   reference: Evaluation;
   assessment: { affected_work_orders: string[]; if_unhandled: string[] } | null;
@@ -228,9 +261,20 @@ export interface IncidentSummary {
 export interface FactoryState {
   revision: number;
   running: boolean;
-  ai: { enabled: boolean; provider: string; model: string };
+  /** 已發生、等前一件決定完才受理的事件數 */
+  backlog: number;
+  /** check:啟動時向供應端查模型的結果;已設定不等於每次呼叫都會成功 */
+  ai: { enabled: boolean; provider: string; model: string; check: "unchecked" | "ok" | "missing" | "error"; model_id: string | null; note: string | null };
   snapshot: Snapshot;
   policy: Policy;
-  schedule: { version: number; plan: Plan; evaluation: Evaluation; still_valid: boolean };
+  schedule: {
+    version: number;
+    plan: Plan;
+    evaluation: Evaluation;
+    still_valid: boolean;
+    /** 指標是用哪一版快照、何時算的 */
+    computed_on_snapshot: number;
+    computed_at: string;
+  };
   incidents: IncidentSummary[];
 }

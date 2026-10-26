@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import AiPanel from "./AiPanel";
 import Gantt from "./Gantt";
 import { Legend } from "./Overview";
-import { api } from "@/lib/api";
+import { ApiError, api, outcomeUnknown, requestId } from "@/lib/api";
 import {
+  COST_LABEL,
+  MAX_REASON_CHARS,
   METRIC_LABEL,
   MIN_PER_DAY,
   STAGES,
@@ -77,11 +79,13 @@ function DecisionPanel({
   plan,
   evaluation,
   act,
+  locked,
 }: {
   incident: Incident;
   plan: Plan;
   evaluation: Evaluation;
   act: Act;
+  locked: boolean;
 }) {
   const [mode, setMode] = useState<"idle" | "approve" | "reject">("idle");
   const [reason, setReason] = useState("");
@@ -92,9 +96,33 @@ function DecisionPanel({
   const ok = eligible(evaluation);
   const canDecide = incident.status === "awaiting_approval" || incident.status === "rejected";
   const changes = changesOf(incident, evaluation);
+  // 口徑:既有工單改動(排序指標,不含新單)+ 新排入 = 本次變更
+  const added = changes.filter((c) => c.from === "尚未排入").length;
+  const existing = evaluation.kpis?.changed_work_orders ?? changes.length - added;
+  const tally = `既有 ${existing} + 新排 ${added} = ${existing + added} 張`;
+  const applied = incident.applied_plan_id === plan.id;
+
+  async function approve() {
+    const id = requestId();
+    const seen = { snapshot_version: incident.snapshot.version, schedule_version: incident.schedule_version, policy_version: incident.policy_version };
+    await act(async () => {
+      try {
+        await api.approve(incident.id, plan.id, seen, id);
+      } catch (error) {
+        if (!outcomeUnknown(error)) throw error;
+        // 回應沒收到:先查後端有沒有記下這次核准,不盲目重送
+        const now = await api.incident(incident.id).catch(() => null);
+        if (now?.decisions.some((d) => d.request_id === id)) return;
+        throw new ApiError(now ? "核准沒有送達,工廠未改動,可以再按一次。" : "連線中斷,不確定核准是否送達;恢復連線後先看狀態再操作。", 409);
+      }
+    });
+  }
   const needsSignoff = plan.overtime.length > 0 || plan.outsourced.length > 0;
 
   const k = evaluation.kpis;
+  const trimmed = reason.trim().length;
+  const reasonProblem =
+    trimmed === 0 ? "請寫下退回原因" : trimmed > MAX_REASON_CHARS ? `超過 ${trimmed - MAX_REASON_CHARS} 字,請刪減到 ${MAX_REASON_CHARS} 字內` : null;
 
   return (
     <div className={`decision ${recommended ? "good" : ok ? "" : "critical"}`}>
@@ -103,6 +131,7 @@ function DecisionPanel({
           {recommended ? "✓ 系統建議" : ok ? "可選" : "✕ 不能採用"}
         </span>
         {plan.id}・{plan.label}
+        {ok && <span className={`chip ${applied ? "good" : ""}`}>{applied ? "已套用" : "試算・未套用"}</span>}
       </h3>
 
       {ok && k ? (
@@ -116,12 +145,21 @@ function DecisionPanel({
             <dd>{k.late_work_orders.length} <small>張</small></dd>
           </div>
           <div>
-            <dt>改動工單</dt>
-            <dd>{k.changed_work_orders ?? "—"} <small>張</small></dd>
+            <dt>改動既有工單</dt>
+            <dd>
+              {existing} <small>張{added > 0 && `・另新排 ${added}`}</small>
+            </dd>
           </div>
           <div>
             <dt>額外成本</dt>
             <dd>{ntd(k.cost_ntd)}</dd>
+            {/* 各項分開列,試模不併進換模費 */}
+            <dd className="cost-parts">
+              {Object.entries(k.cost_breakdown_ntd)
+                .filter(([, v]) => v > 0)
+                .map(([key, v]) => `${COST_LABEL[key] ?? key} ${ntd(v)}`)
+                .join("・")}
+            </dd>
           </div>
         </dl>
       ) : (
@@ -142,7 +180,7 @@ function DecisionPanel({
 
       {ok && (
         <details className="changes">
-          <summary>會改動 {changes.length} 張工單</summary>
+          <summary className="changes-sum">變更明細:{tally}</summary>
           <div className="table-scroll">
             <table>
               <thead>
@@ -170,11 +208,11 @@ function DecisionPanel({
 
       {canDecide && ok && mode === "idle" && (
         <div className="actions">
-          <button type="button" className="primary" onClick={() => setMode("approve")}>
+          <button type="button" className="primary" disabled={locked} onClick={() => setMode("approve")}>
             {recommended ? "核准" : "改選這個方案"}
           </button>
           {incident.status === "awaiting_approval" && recommended && (
-            <button type="button" onClick={() => setMode("reject")}>
+            <button type="button" disabled={locked} onClick={() => setMode("reject")}>
               退回
             </button>
           )}
@@ -183,10 +221,10 @@ function DecisionPanel({
       {mode === "approve" && (
         <div className="confirm" role="group" aria-label="確認核准">
           <p>
-            核准 <b>{plan.id}</b>,改動 {changes.length} 張工單?{!recommended && "(非系統建議,會記入紀錄)"}
+            核准 <b>{plan.id}</b>({tally})?{!recommended && "(非系統建議,會記入紀錄)"}
           </p>
           <div className="actions">
-            <button type="button" className="primary" onClick={() => act(() => api.approve(incident.id, plan.id))}>
+            <button type="button" className="primary" disabled={locked} onClick={approve}>
               確認核准
             </button>
             <button type="button" onClick={() => setMode("idle")}>
@@ -198,11 +236,26 @@ function DecisionPanel({
       {mode === "reject" && (
         <div className="confirm" role="group" aria-label="確認退回">
           <label>
-            退回原因
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="例如:這週不希望動到這麼多工單" />
+            退回原因(必填)
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="例如:這週不希望動到這麼多工單"
+              aria-invalid={reasonProblem !== null}
+              aria-describedby="reason-hint"
+            />
           </label>
+          <p id="reason-hint" className={`field-hint${reason.trim().length > MAX_REASON_CHARS ? " bad" : ""}`}>
+            {reasonProblem ?? `${reason.trim().length} / ${MAX_REASON_CHARS} 字`}
+          </p>
           <div className="actions">
-            <button type="button" className="danger" onClick={() => act(() => api.reject(incident.id, reason.trim()))}>
+            <button
+              type="button"
+              className="danger"
+              disabled={locked || reasonProblem !== null}
+              onClick={() => act(() => api.reject(incident.id, reason.trim()))}
+            >
               確認退回
             </button>
             <button type="button" onClick={() => setMode("idle")}>
@@ -220,11 +273,14 @@ export default function IncidentView({
   policy,
   aiEnabled,
   act,
+  locked,
 }: {
   incident: Incident;
   policy: Policy;
   aiEnabled: boolean;
   act: Act;
+  /** 連線中斷時唯讀:可以看、可以切換預覽,不能送出異動 */
+  locked: boolean;
 }) {
   const fallback = incident.applied_plan_id ?? incident.ranking?.winner ?? incident.plans[0]?.id ?? ORIGINAL;
   const [selected, setSelected] = useState(fallback);
@@ -331,13 +387,28 @@ export default function IncidentView({
       )}
       {canReassess && (
         <div className="actions">
-          <button type="button" className="primary" onClick={() => act(() => api.reassess(incident.id))}>
+          <button type="button" className="primary" disabled={locked} onClick={() => act(() => api.reassess(incident.id))}>
             重新評估
           </button>
         </div>
       )}
 
-      <AiPanel incident={incident} aiEnabled={aiEnabled} />
+      {incident.tasks.some((t) => t.done) && (
+        <section className="card">
+          <ul className="tasks">
+            {incident.tasks.filter((t) => t.done).map((task) => (
+              <li key={task.id}>
+                <b>✓ {task.subject} 已復機</b>
+                <span>
+                  {task.done_by}・{timeOfDay(task.done_at!)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <AiPanel incident={incident} aiEnabled={aiEnabled} locked={locked} />
 
       {incident.tasks.some((t) => !t.done) && incident.applied_plan_id && (
         <section className="card">
@@ -345,7 +416,7 @@ export default function IncidentView({
             {incident.tasks.filter((t) => !t.done).map((task) => (
               <li key={task.id}>
                 <b>◐ {task.subject} 維修中</b>
-                <button type="button" onClick={() => act(() => api.confirmTask(incident.id, task.id))}>
+                <button type="button" disabled={locked} onClick={() => act(() => api.confirmTask(incident.id, task.id))}>
                   回報已復機
                 </button>
               </li>
@@ -356,7 +427,7 @@ export default function IncidentView({
 
       {incident.evaluations.length > 0 && (
         <section className="card">
-          {plan && evaluation && <DecisionPanel incident={incident} plan={plan} evaluation={evaluation} act={act} />}
+          {plan && evaluation && <DecisionPanel incident={incident} plan={plan} evaluation={evaluation} act={act} locked={locked} />}
 
           <div className="table-scroll">
             <table className="plans">
@@ -414,7 +485,9 @@ export default function IncidentView({
 
       <section className="card">
         <header className="card-head split">
-          <h2>{viewingOriginal ? "事件前的排程" : `${plan!.id} 排程預覽`}</h2>
+          <h2>
+            {viewingOriginal ? "事件前基準" : `${plan!.id} ${incident.applied_plan_id === plan!.id ? "已套用" : "試算預覽・未套用"}`}
+          </h2>
           {incident.plans.length > 0 && (
             <div className="toggle" role="group" aria-label="切換排程">
               <button type="button" aria-pressed={!viewingOriginal} onClick={() => setSelected(fallback === ORIGINAL ? incident.plans[0].id : fallback)}>
@@ -472,21 +545,6 @@ export default function IncidentView({
           </div>
         </details>
       </section>
-
-      <details className="card fold">
-        <summary>處理歷程({incident.trace.length})</summary>
-        <ol className="trace">
-          {incident.trace.map((entry) => (
-            <li key={entry.seq}>
-              <time>{timeOfDay(entry.at)}</time>
-              <span className="chip">{STAGES.find((s) => s.key === entry.stage)?.label}</span>
-              <p>
-                <b>{entry.actor}</b> {entry.message}
-              </p>
-            </li>
-          ))}
-        </ol>
-      </details>
     </>
   );
 }

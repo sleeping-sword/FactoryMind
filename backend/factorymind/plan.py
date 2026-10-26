@@ -29,6 +29,7 @@ class Operation(Model):
     machine_id: str
     start_min: int = Field(description="含換模的開始時間")
     setup_min: int
+    trial_min: int = Field(default=0, description="第一次上沒試過的機台:試模加首件確認,接在換模之後")
     end_min: int
     mold_changed: bool
 

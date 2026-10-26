@@ -35,13 +35,14 @@ def demo_snapshot() -> FactorySnapshot:
         Machine(id="IM-06", role="大型機:車用儀表框等大件", tonnage=300, current_mold_id="MD-F", current_material_id="PC", current_color_shade=8),
     ]
     molds = [
-        Mold(id="MD-A", min_tonnage=80, max_tonnage=150),
-        Mold(id="MD-B", min_tonnage=100, max_tonnage=200),
-        Mold(id="MD-C", min_tonnage=100, max_tonnage=200),
-        Mold(id="MD-D", min_tonnage=150, max_tonnage=300),
-        Mold(id="MD-E", min_tonnage=60, max_tonnage=120),
-        Mold(id="MD-F", min_tonnage=200, max_tonnage=300),
-        Mold(id="MD-G", min_tonnage=100, max_tonnage=150),
+        # 相容清單是合成假設;唯一的排除:儀表框模具 MD-F 寬度超過 IM-04 的繫桿間距(噸數雖符合)
+        Mold(id="MD-A", min_tonnage=80, max_tonnage=150, fits_machines=["IM-01", "IM-02", "IM-03", "IM-05"]),
+        Mold(id="MD-B", min_tonnage=100, max_tonnage=200, fits_machines=["IM-02", "IM-03", "IM-04", "IM-05"]),
+        Mold(id="MD-C", min_tonnage=100, max_tonnage=200, fits_machines=["IM-02", "IM-03", "IM-04", "IM-05"]),
+        Mold(id="MD-D", min_tonnage=150, max_tonnage=300, fits_machines=["IM-04", "IM-05", "IM-06"]),
+        Mold(id="MD-E", min_tonnage=60, max_tonnage=120, fits_machines=["IM-01", "IM-02", "IM-03"]),
+        Mold(id="MD-F", min_tonnage=200, max_tonnage=300, fits_machines=["IM-06"]),
+        Mold(id="MD-G", min_tonnage=100, max_tonnage=150, fits_machines=["IM-02", "IM-03", "IM-05"]),
     ]
     materials = [
         Material(id="ABS", on_hand_kg=2500),
@@ -52,7 +53,9 @@ def demo_snapshot() -> FactorySnapshot:
         Product(id="A-WHT", name="電子產品外殼(白)", mold_id="MD-A", material_id="ABS", color_shade=1, units_per_hour=400, material_kg_per_unit=0.05, outsource_unit_cost_ntd=9),
         Product(id="A-BLK", name="電子產品外殼(黑)", mold_id="MD-A", material_id="ABS", color_shade=8, units_per_hour=400, material_kg_per_unit=0.05, outsource_unit_cost_ntd=9),
         Product(id="B-CLR", name="透明上蓋", mold_id="MD-B", material_id="PC", color_shade=0, units_per_hour=300, material_kg_per_unit=0.08, outsource_unit_cost_ntd=14),
-        Product(id="C-MED", name="醫療耗材盒", mold_id="MD-C", material_id="PP", color_shade=0, units_per_hour=500, material_kg_per_unit=0.03, outsource_unit_cost_ntd=11),
+        # 醫療件:客戶只認可三台;只在 IM-02、IM-04 試模過,第一次上 IM-03 要先試模與首件確認
+        Product(id="C-MED", name="醫療耗材盒", mold_id="MD-C", material_id="PP", color_shade=0, units_per_hour=500, material_kg_per_unit=0.03, outsource_unit_cost_ntd=11,
+                approved_machines=["IM-02", "IM-03", "IM-04"], proven_machines=["IM-02", "IM-04"]),
         Product(id="D-GRY", name="車用內裝飾板(灰)", mold_id="MD-D", material_id="ABS", color_shade=5, units_per_hour=200, material_kg_per_unit=0.15, outsource_unit_cost_ntd=26),
         Product(id="D-BLK", name="車用內裝飾板(黑)", mold_id="MD-D", material_id="ABS", color_shade=8, units_per_hour=200, material_kg_per_unit=0.15, outsource_unit_cost_ntd=26),
         Product(id="E-WHT", name="按鍵(白)", mold_id="MD-E", material_id="PP", color_shade=1, units_per_hour=600, material_kg_per_unit=0.02, outsource_unit_cost_ntd=5),
@@ -101,7 +104,7 @@ def demo_snapshot() -> FactorySnapshot:
         customers=customers,
         work_orders=work_orders,
         calendar=ShiftCalendar(day_start_min=8 * 60, day_end_min=SHIFT_END, horizon_days=5),
-        setup_times=SetupTimes(mold_change_min=120, material_change_min=45, color_darker_min=15, color_lighter_min=40),
+        setup_times=SetupTimes(mold_change_min=120, material_change_min=45, color_darker_min=15, color_lighter_min=40, trial_run_min=90),
         cost_rates=CostRates(overtime_ntd_per_min=60, setup_ntd_per_min=20),
         outsource_lead_time_min=2 * DAY + 12 * 60,
     )

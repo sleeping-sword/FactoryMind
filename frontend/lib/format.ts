@@ -1,6 +1,8 @@
 import type { Elimination, Evaluation, Metric, OvertimeGrant, Snapshot, Stage, Status } from "./types";
 
 export const MIN_PER_DAY = 1440;
+/** 退回理由上限;與後端 governance.MAX_REASON_CHARS 相同。 */
+export const MAX_REASON_CHARS = 200;
 
 export const METRIC_LABEL: Record<Metric, string> = {
   strategic_tardiness_min: "策略客戶延誤",
@@ -16,7 +18,7 @@ export const METRIC_UNIT: Record<Metric, string> = {
   cost_ntd: "元",
 };
 
-export const COST_LABEL: Record<string, string> = { overtime: "加班", outsourcing: "外包", setup: "換模" };
+export const COST_LABEL: Record<string, string> = { overtime: "加班", outsourcing: "外包", setup: "換模", trial: "試模" };
 
 const number = new Intl.NumberFormat("zh-TW");
 
@@ -75,6 +77,9 @@ export const STATUS: Record<Status, { label: string; icon: string; tone: "good" 
   applied_pending_tasks: { label: "生產已調整・設備維修中", icon: "◐", tone: "wait", next: "維修確認者:回報復機" },
   closed: { label: "已結案", icon: "✓", tone: "good", next: "無" },
 };
+
+/** 還要主管做決定的狀態,和後端 NEEDS_DECISION 一致;有這種事件時新事件先排隊。 */
+export const NEEDS_DECISION = new Set<Status>(["processing", "awaiting_approval", "no_compliant_plan", "rejected", "stale", "failed"]);
 
 /** 把分鐘換成主管習慣的說法。 */
 export function duration(minutes: number): string {

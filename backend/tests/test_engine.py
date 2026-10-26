@@ -53,9 +53,9 @@ def factory(work_orders, abs_kg=10_000):
             Machine(id="M2", tonnage=100, current_mold_id="Y", current_material_id="ABS", current_color_shade=1),
         ],
         molds=[
-            Mold(id="X", min_tonnage=50, max_tonnage=150),
-            Mold(id="Y", min_tonnage=50, max_tonnage=150),
-            Mold(id="Z", min_tonnage=200, max_tonnage=300),
+            Mold(id="X", min_tonnage=50, max_tonnage=150, fits_machines=["M1", "M2"]),
+            Mold(id="Y", min_tonnage=50, max_tonnage=150, fits_machines=["M1", "M2"]),
+            Mold(id="Z", min_tonnage=200, max_tonnage=300, fits_machines=[]),
         ],
         materials=[Material(id="ABS", on_hand_kg=abs_kg), Material(id="PP", on_hand_kg=10_000)],
         products=[

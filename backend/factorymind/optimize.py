@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .dispatch import Rule, dispatch
 from .evaluate import evaluate
-from .models import FactorySnapshot, MachineStatus, WorkOrderStatus, by_id, is_compatible
+from .models import FactorySnapshot, MachineStatus, WorkOrderStatus, by_id, can_run
 from .plan import Evaluation, OvertimeGrant, Plan
 from .policy import Policy
 
@@ -105,7 +105,8 @@ def optimize(
         wo_id: [
             m.id
             for m in snapshot.machines
-            if m.status == MachineStatus.UP and is_compatible(molds[products[work_orders[wo_id].product_id].mold_id], m)
+            if m.status == MachineStatus.UP
+            and can_run(products[work_orders[wo_id].product_id], molds[products[work_orders[wo_id].product_id].mold_id], m)
         ]
         for wo_id in movable
     }

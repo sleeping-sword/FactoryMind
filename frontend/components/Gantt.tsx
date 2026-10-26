@@ -18,10 +18,10 @@ interface Bar {
   late: number;
 }
 
-/** 把一張工單切成實際工作的片段:跨夜會停工,前 setup_min 分鐘是換模。 */
+/** 把一張工單切成實際工作的片段:跨夜會停工,前段是換模與試模。 */
 function segmentsOf(op: Operation, windows: [number, number][]): Segment[] {
   const segments: Segment[] = [];
-  let setupLeft = op.setup_min;
+  let setupLeft = op.setup_min + (op.trial_min ?? 0);
   for (const [winStart, winEnd] of windows) {
     let from = Math.max(winStart, op.start_min);
     const to = Math.min(winEnd, op.end_min);

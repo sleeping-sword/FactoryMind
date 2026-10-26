@@ -13,6 +13,7 @@ class Elimination(BaseModel):
     value: float | None = None
     best: float | None = None
     threshold: float | None = None
+    pool: list[str] = []  # 順位比較時,該輪一起比較的方案
 
 
 class RankingResult(BaseModel):
@@ -54,6 +55,7 @@ def rank(evaluations: list[Evaluation], criteria: list[RankingCriterion]) -> Ran
             )
         # 一律對照當前最佳值,不串連相鄰方案的小差異
         best = min(values.values())
+        pool = [ev.plan_id for ev in remaining]
         kept = []
         for ev in remaining:
             if values[ev.plan_id] - best <= criterion.threshold:
@@ -67,6 +69,7 @@ def rank(evaluations: list[Evaluation], criteria: list[RankingCriterion]) -> Ran
                         value=values[ev.plan_id],
                         best=best,
                         threshold=criterion.threshold,
+                        pool=pool,
                     )
                 )
         remaining = kept

@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import Gantt from "./Gantt";
 import Machines from "./Machines";
-import { METRIC_LABEL, MIN_PER_DAY, STATUS, duration, ntd, num } from "@/lib/format";
-import type { FactoryState } from "@/lib/types";
+import { METRIC_LABEL, MIN_PER_DAY, STATUS, duration, ntd, num, timeOfDay } from "@/lib/format";
+import { api } from "@/lib/api";
+import type { FactoryState, ProcessParameter } from "@/lib/types";
 
 /** 營運總覽:先讓主管知道要不要介入,再看目前生效的排程。 */
 export default function Overview({ state, onOpen }: { state: FactoryState; onOpen: (id: string) => void }) {
@@ -13,6 +15,9 @@ export default function Overview({ state, onOpen }: { state: FactoryState; onOpe
   const latest = Math.max(snapshot.calendar.day_end_min, ...schedule.evaluation.operations.map((op) => op.end_min));
   const axisEnd = Math.floor(latest / MIN_PER_DAY) * MIN_PER_DAY + snapshot.calendar.day_end_min + policy.hard_limits.max_overtime_min_per_machine_day;
   const limits = policy.hard_limits;
+  const valid = schedule.still_valid;
+  const late = kpis ? `${kpis.late_work_orders.length} 張` : "—";
+  const cost = kpis ? ntd(kpis.cost_ntd) : "—";
 
   return (
     <>
@@ -40,6 +45,15 @@ export default function Overview({ state, onOpen }: { state: FactoryState; onOpe
       </section>
 
       <section className="card">
+        <header className="card-head split">
+          <div>
+            <h2>排程 v{schedule.version}</h2>
+            <p>
+              快照 v{schedule.computed_on_snapshot}・{timeOfDay(schedule.computed_at)} 計算
+            </p>
+          </div>
+          <span className={`chip ${valid ? "good" : "critical"}`}>{valid ? "✓ 生效中" : "✕ 事件前基準・已失效"}</span>
+        </header>
         <dl className="tiles four">
           <div>
             <dt>可用機台</dt>
@@ -51,11 +65,15 @@ export default function Overview({ state, onOpen }: { state: FactoryState; onOpe
           </div>
           <div>
             <dt>逾期訂單</dt>
-            <dd>{kpis ? kpis.late_work_orders.length : "—"} <small>張{kpis && kpis.total_tardiness_min > 0 ? `・合計 ${duration(kpis.total_tardiness_min)}` : ""}</small></dd>
+            {valid ? (
+              <dd>{late} <small>{kpis && kpis.total_tardiness_min > 0 ? `合計 ${duration(kpis.total_tardiness_min)}` : ""}</small></dd>
+            ) : (
+              <dd className="pending">待評估 <small>事件前 {late}</small></dd>
+            )}
           </div>
           <div>
             <dt>額外成本</dt>
-            <dd>{kpis ? ntd(kpis.cost_ntd) : "—"}</dd>
+            {valid ? <dd>{cost}</dd> : <dd className="pending">待評估 <small>事件前 {cost}</small></dd>}
           </div>
         </dl>
       </section>
@@ -100,6 +118,9 @@ export default function Overview({ state, onOpen }: { state: FactoryState; onOpe
         </div>
       </details>
 
+      <Capabilities />
+      <ProcessParameters />
+
       <details className="card fold" open>
         <summary>機台與生產流程</summary>
         <Machines snapshot={snapshot} schedule={schedule.still_valid ? schedule.evaluation : undefined} />
@@ -113,9 +134,100 @@ export function Legend() {
     <div className="legend" aria-hidden>
       <span><i className="swatch tier-normal" /> 一般客戶</span>
       <span><i className="swatch tier-strategic" /> ★ 策略客戶</span>
-      <span><i className="swatch is-setup" /> 換模／換色</span>
+      <span><i className="swatch is-setup" /> 換模／換色／試模</span>
       <span><i className="swatch overtime" /> 加班時段</span>
       <span><i className="swatch night" /> 非上班時間</span>
     </div>
+  );
+}
+
+/** 誰負責什麼、哪些做好了。依實際交付更新,不把規劃寫成已完成。 */
+const ROLES = [
+  { step: "試算", who: "系統計算" },
+  { step: "說明", who: "AI" },
+  { step: "核准", who: "生產主管" },
+  { step: "確認復機", who: "維修人員" },
+];
+const CAPABILITIES: { state: "done" | "planned" | "untested"; label: string; items: string[] }[] = [
+  { state: "done", label: "✓ 已實作", items: ["產生方案、試跑、硬規則檢查", "依政策排序", "核准前重驗版本", "維修回報後結案", "AI 摘要與問答", "AI 數字對回方案與指標"] },
+  { state: "planned", label: "◌ 規劃中", items: ["AI 自主選擇分析工具", "維修預估時間與重算", "事件報告匯出"] },
+  { state: "untested", label: "? 尚未驗證", items: ["投影與實體手機閱讀", "真實模型穩定度", "實廠資料"] },
+];
+
+/** R05 參數出處表:排程用到的製程限制從哪裡來、確認了沒。 */
+function ProcessParameters() {
+  const [rows, setRows] = useState<ProcessParameter[] | null>(null);
+  useEffect(() => {
+    api.parameters().then(setRows, () => setRows([]));
+  }, []);
+  const pending = rows?.filter((r) => r.status !== "已確認").length ?? 0;
+  return (
+    <details className="card fold">
+      <summary>
+        製程參數出處{rows && rows.length > 0 && <small>・{pending} 項未經製程覆核</small>}
+      </summary>
+      {rows === null ? (
+        <p className="footnote">讀取中…</p>
+      ) : rows.length === 0 ? (
+        <p className="footnote">讀不到參數表,請確認後端服務。</p>
+      ) : (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>參數</th>
+                <th>對象</th>
+                <th>值</th>
+                <th>適用範圍</th>
+                <th>來源・狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.name}-${r.target}`}>
+                  <td>{r.name}</td>
+                  <td>{r.target}</td>
+                  <td>
+                    {r.value} {r.unit}
+                  </td>
+                  <td>{r.scope}</td>
+                  <td>
+                    {r.assumption ? "假設" : r.source}・{r.status}・{r.version}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </details>
+  );
+}
+
+function Capabilities() {
+  return (
+    <details className="card fold">
+      <summary>分工與能力</summary>
+      <ol className="flow roles">
+        {ROLES.map((r) => (
+          <li key={r.step}>
+            <b>{r.step}</b>
+            <small>{r.who}</small>
+          </li>
+        ))}
+      </ol>
+      <div className="capabilities">
+        {CAPABILITIES.map((group) => (
+          <div key={group.state} className={group.state}>
+            <h3>{group.label}</h3>
+            <ul className="bullets">
+              {group.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
