@@ -36,7 +36,7 @@ def test_every_plan_metric_is_evidence_with_versions_and_unit():
     assert p3_cost.policy_version == factory.policy.version and p3_cost.engine_version
     assert len({e.id for e in evidence}) == len(evidence)
     p6_changed = next(e for e in evidence if e.plan_id == "P6" and e.metric == "changed_work_orders")
-    assert (p6_changed.value, p6_changed.unit) == (8, "張")
+    assert (p6_changed.value, p6_changed.unit) == (9, "張")
 
 
 def _find(evidence, plan_id, metric):
@@ -78,13 +78,13 @@ def test_marker_described_as_another_metric_is_rejected():
 
 
 def test_metric_numbers_written_without_marker_are_rejected():
-    """不能繞過標記直接寫數字:P6 的 59,900 直接寫在 P3 後面也要被擋。"""
+    """不能繞過標記直接寫數字:P6 的 54,800 直接寫在 P3 後面也要被擋。"""
     from factorymind.evidence import build_evidence, check_text
 
     _, incident = processed()
     evidence = build_evidence(incident)
-    assert check_text("P3 額外成本 NT$59,900", evidence)
-    assert check_text("P3 改動 8 張工單", evidence)
+    assert check_text("P3 額外成本 NT$54,800", evidence)
+    assert check_text("P3 改動 9 張工單", evidence)
     # 工單、機台編號與交期時間不是指標數字
     assert check_text("急單 WO-R1 交期 D1 20:00,IM-02 停機,改排 WO-12", evidence) == []
 

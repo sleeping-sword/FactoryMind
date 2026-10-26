@@ -5,8 +5,9 @@
 
 環境變數(可寫在 backend/.env):
 - GEMINI_API_KEY 或 FACTORYMIND_LLM_API_KEY:金鑰;沒有金鑰時 AI 關閉,全部改用規則產生的文字
-- FACTORYMIND_LLM_MODEL:模型名稱,預設 gemini-3.5-flash-lite(不先寫思考過程,1–3 秒回答;
-  Gemma 每次都先寫上千字的思考,常拖到 60 秒以上,API 也關不掉)
+- FACTORYMIND_LLM_MODEL:模型名稱,預設 gemma-4-26b-a4b-it(競賽指定的模型家族)。啟動時向供應端查一次
+  實際識別碼;供應端沒有這個模型就改用規則文字並標明原因,不自動換成別的模型
+- FACTORYMIND_LLM_TIMEOUT_S:每次呼叫的等待上限,預設 60 秒(Gemini 免費版排隊時常要 15–25 秒)
 - FACTORYMIND_LLM_BASE_URL:預設 Gemini 的 OpenAI 相容端點
 - FACTORYMIND_LLM=off:強制關閉(測試用)
 
@@ -25,7 +26,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-DEFAULT_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_MODEL = "gemma-4-26b-a4b-it"
 # 免費額度每分鐘 15 次,超過時 Gemini 會說要等幾秒;等得不久就自動重送
 _RETRY_IN = re.compile(r"retry in ([\d.]+)s")
 _MAX_WAIT_S = 10
@@ -42,7 +43,7 @@ class LLMConfig:
     api_key: str
     model: str
     base_url: str
-    timeout_s: float = 20  # 正常回應約 6 秒;免費服務偶爾卡住,不要讓主管乾等
+    timeout_s: float = 60
     enabled: bool = True
     json_mode: bool = True
 
@@ -64,7 +65,7 @@ class LLMConfig:
             model=model,
             json_mode=json_mode,
             base_url=base_url.rstrip("/"),
-            timeout_s=float(os.environ.get("FACTORYMIND_LLM_TIMEOUT_S", 20)),
+            timeout_s=float(os.environ.get("FACTORYMIND_LLM_TIMEOUT_S", 60)),
             enabled=enabled,
         )
 
@@ -73,13 +74,38 @@ class LLMClient:
     def __init__(self, config: LLMConfig | None = None, transport: httpx.BaseTransport | None = None):
         self.config = config or LLMConfig.from_env()
         self._transport = transport
+        # 啟動檢查:unchecked → ok(查到識別碼)/ missing(供應端沒有)/ error(查不到,照常嘗試)
+        self.check, self.model_id, self.note = "unchecked", None, None
 
     @property
     def enabled(self) -> bool:
-        return self.config.enabled
+        return self.config.enabled and self.check != "missing"
 
     def status(self) -> dict:
-        return {"enabled": self.enabled, "provider": self.config.provider, "model": self.config.model}
+        return {
+            "enabled": self.enabled, "provider": self.config.provider, "model": self.config.model,
+            "check": self.check, "model_id": self.model_id, "note": self.note,
+        }
+
+    def verify_model(self) -> None:
+        """向供應端查模型清單,記下實際識別碼;Gemini 的識別碼前面帶 models/。"""
+        if not self.config.enabled:
+            return
+        headers = {"Authorization": f"Bearer {self.config.api_key}"} if self.config.api_key else {}
+        try:
+            with httpx.Client(timeout=min(self.config.timeout_s, 10), transport=self._transport) as client:
+                response = client.get(f"{self.config.base_url}/models", headers=headers)
+            ids = [m["id"] for m in response.json()["data"]] if response.status_code == 200 else None
+        except (httpx.HTTPError, KeyError, TypeError, ValueError):
+            ids = None
+        if ids is None:
+            self.check, self.note = "error", "啟動時查不到供應端的模型清單,呼叫時才知道能不能用"
+            return
+        self.model_id = next((i for i in ids if i == self.config.model or i.rsplit("/", 1)[-1] == self.config.model), None)
+        if self.model_id:
+            self.check, self.note = "ok", None
+        else:
+            self.check, self.note = "missing", f"供應端沒有模型 {self.config.model},改用規則摘要"
 
     def structured(
         self,

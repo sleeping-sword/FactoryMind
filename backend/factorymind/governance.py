@@ -21,7 +21,7 @@ from .candidates import generate_candidates
 from .dispatch import dispatch
 from .evaluate import evaluate
 from .events import FactoryEvent, apply_event, machine_restored
-from .models import CustomerTier, FactorySnapshot, MachineStatus, WorkOrder, by_id, is_compatible
+from .models import CustomerTier, FactorySnapshot, MachineStatus, WorkOrder, by_id, can_run
 from .optimize import SearchResult
 from .plan import Evaluation, Plan
 from .policy import Policy
@@ -89,6 +89,7 @@ class Decision(BaseModel):
     snapshot_version: int
     schedule_version: int
     policy_version: str
+    request_id: str | None = None  # 前端每次按下核准產生一個;重送同一個不會再套用一次
 
 
 class Assessment(BaseModel):
@@ -160,7 +161,7 @@ class EventSource:
 
     def _rush_order(self, snapshot: FactorySnapshot, up: list) -> FactoryEvent:
         molds = by_id(snapshot.molds)
-        makeable = [p for p in snapshot.products if any(is_compatible(molds[p.mold_id], m) for m in up)]
+        makeable = [p for p in snapshot.products if any(can_run(p, molds[p.mold_id], m) for m in up)]
         product = self.random.choice(makeable or snapshot.products)
         customer = self.random.choice(snapshot.customers)
         number = 1 + sum(1 for w in snapshot.work_orders if w.is_rush)
@@ -176,12 +177,20 @@ class EventSource:
         return FactoryEvent(type="rush_order", subject=order.id, note=f"{kind}臨時追加的急單", work_order=order)
 
 
+# 事件之間隔 30 秒到 4 分鐘,每次以 30 秒為一級隨機挑
+EVENT_INTERVALS_S = tuple(range(30, 241, 30))
+
+
 class VirtualFactory:
-    def __init__(self, *, first_event_delay_s: float = 5, next_event_delay_s: float = 30, advisor: Advisor | None = None):
+    def __init__(
+        self, *, first_event_delay_s: float = 5, next_event_choices_s: tuple[float, ...] = EVENT_INTERVALS_S,
+        advisor: Advisor | None = None, rng: random.Random | None = None,
+    ):
         self._lock = threading.RLock()
         self.advisor = advisor or Advisor()
         self.first_event_delay_s = first_event_delay_s
-        self.next_event_delay_s = next_event_delay_s
+        self.next_event_choices_s = next_event_choices_s
+        self._rng = rng or random.Random()  # 只決定間隔;事件內容由 EventSource 的固定種子決定
         self.reset()
 
     def reset(self) -> None:
@@ -196,6 +205,8 @@ class VirtualFactory:
             self.source = EventSource()
             self.running = False
             self.next_event_at: float | None = None
+            # 已發生、等前一件決定完才受理的事件(記發生時間);受理時才依當下快照產生內容
+            self.backlog: list[str] = []
             self.revision = getattr(self, "revision", 0) + 1
 
     # ── 虛擬工廠的運轉與自動事件 ───────────────────────────────
@@ -204,7 +215,7 @@ class VirtualFactory:
         with self._lock:
             if not self.running:
                 self.running = True
-                self.next_event_at = now + (self.first_event_delay_s if not self.incidents else self.next_event_delay_s)
+                self.next_event_at = now + (self.first_event_delay_s if not self.incidents else self._interval())
                 self.revision += 1
 
     def pause(self) -> None:
@@ -214,32 +225,40 @@ class VirtualFactory:
             self.revision += 1
 
     def ready_for_event(self) -> bool:
-        """有事件還在等生產決策時不再丟新事件,讓主管一次處理一件。"""
+        """有事件還在等生產決策時,新事件先排隊,讓主管一次處理一件、眼前的方案不會被背景事件弄過期。"""
         return not any(i.status in NEEDS_DECISION for i in self.incidents)
 
-    def tick(self, now: float) -> Incident | None:
-        """由背景迴圈定期呼叫;時間到且可受理時,虛擬工廠自動發出下一個事件。"""
-        with self._lock:
-            if not self.running or not self.ready_for_event():
-                return None
-            if self.next_event_at is None:
-                self.next_event_at = now + self.next_event_delay_s
-                return None
-            if now < self.next_event_at:
-                return None
-            self.next_event_at = None
-            return self.open_incident(self.source.next(self.snapshot))
+    def _interval(self) -> float:
+        return self._rng.choice(self.next_event_choices_s)
 
-    def emit_next(self) -> Incident:
+    def tick(self, now: float) -> Incident | None:
+        """由背景迴圈定期呼叫:運轉中照隨機間隔發生事件;可受理時開立排隊中最早的一件。"""
+        with self._lock:
+            if self.running:
+                if self.next_event_at is None:
+                    self.next_event_at = now + self._interval()
+                elif now >= self.next_event_at:
+                    self.next_event_at = now + self._interval()
+                    if self.ready_for_event() and not self.backlog:
+                        return self.open_incident(self.source.next(self.snapshot))
+                    self.backlog.append(_now())
+                    self.revision += 1
+            if self.backlog and self.ready_for_event():
+                return self.open_incident(self.source.next(self.snapshot), occurred_at=self.backlog.pop(0))
+            return None
+
+    def emit_next(self) -> Incident | None:
+        """手動發生事件;有事件等決定時排進佇列,回傳 None。"""
         with self._lock:
             if not self.ready_for_event():
-                raise GovernanceError("還有事件在等待決策,處理完再產生下一個事件")
-            self.next_event_at = None
+                self.backlog.append(_now())
+                self.revision += 1
+                return None
             return self.open_incident(self.source.next(self.snapshot))
 
     # ── 治理主線 ────────────────────────────────────────────
 
-    def open_incident(self, events: list[FactoryEvent]) -> Incident:
+    def open_incident(self, events: list[FactoryEvent], occurred_at: str | None = None) -> Incident:
         """偵測:受理事件、更新工廠快照、開立事件單。後續步驟由 process() 完成。"""
         with self._lock:
             snapshot = self.snapshot
@@ -269,9 +288,10 @@ class VirtualFactory:
                     for n, e in enumerate(e for e in events if e.type == "machine_down")
                 ],
             )
+            queued = f"事件於 {occurred_at[11:19]} 發生,排隊等前一件決定後受理。" if occurred_at else ""
             incident.log(
                 Stage.DETECT, "虛擬工廠",
-                f"收到事件:{'、'.join(parts)}。工廠快照更新為 v{snapshot.version},相關事件合併為同一件共同評估。",
+                f"{queued}收到事件:{'、'.join(parts)}。工廠快照更新為 v{snapshot.version},相關事件合併為同一件共同評估。",
             )
             self.incidents.append(incident)
             self.revision += 1
@@ -391,9 +411,19 @@ class VirtualFactory:
             self.revision += 1
             return incident
 
-    def approve(self, incident_id: str, plan_id: str, actor: str) -> Incident:
+    def approve(
+        self, incident_id: str, plan_id: str, actor: str, *, expected: dict | None = None, request_id: str | None = None,
+    ) -> Incident:
+        """expected 是主管畫面上的快照/排程/政策版本;request_id 讓回應遺失後重送不會重複套用。"""
         with self._lock:
             incident = self._get(incident_id)
+            if request_id and any(d.request_id == request_id for d in incident.decisions):
+                return incident
+            if expected is not None and expected != {
+                "snapshot_version": incident.snapshot.version, "schedule_version": incident.schedule_version,
+                "policy_version": incident.policy_version,
+            }:
+                raise GovernanceError("畫面上的資料已過期,請重新整理後再核准")
             if incident.status not in {Status.AWAITING_APPROVAL, Status.REJECTED}:
                 raise GovernanceError("這個事件目前不在可核准的狀態")
             plan = next((p for p in incident.plans if p.id == plan_id), None)
@@ -422,7 +452,7 @@ class VirtualFactory:
                     kind="approved", plan_id=plan_id, actor=actor, at=_now(),
                     followed_recommendation=incident.ranking is not None and incident.ranking.winner == plan_id,
                     snapshot_version=self.snapshot.version, schedule_version=self.schedule_version,
-                    policy_version=self.policy.version,
+                    policy_version=self.policy.version, request_id=request_id,
                 )
             )
             incident.log(
@@ -518,6 +548,7 @@ class VirtualFactory:
             return {
                 "revision": self.revision,
                 "running": self.running,
+                "backlog": len(self.backlog),
                 "ai": self.advisor.status(),
                 "snapshot": self.snapshot.model_dump(mode="json"),
                 "policy": self.policy.model_dump(mode="json"),

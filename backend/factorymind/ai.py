@@ -18,7 +18,7 @@ from .evaluate import changed_work_orders
 from .plan import Evaluation
 from .policy import Policy
 
-COST_LABEL = {"overtime": "加班", "outsourcing": "外包", "setup": "換模"}
+COST_LABEL = {"overtime": "加班", "outsourcing": "外包", "setup": "換模", "trial": "試模"}
 STATUS_LABEL = {
     "processing": "系統處理中",
     "awaiting_approval": "等主管決定",
@@ -307,7 +307,8 @@ class Advisor:
         if _CAUSE_QUESTION.search(question):
             return ChatTurn(question=question, answer=UNKNOWN_CAUSE, source="rules", actor=actor, at=_now())
         if not self.client.enabled:
-            return ChatTurn(question=question, answer="AI 尚未啟用:後端沒有設定金鑰。", source="rules", actor=actor, at=_now())
+            reason = self.client.note or "後端沒有設定金鑰"
+            return ChatTurn(question=question, answer=f"AI 尚未啟用:{reason}。", source="rules", actor=actor, at=_now())
         past = "\n".join(f"主管:{t.question}\n助理:{t.answer}" for t in history[-4:])
         try:
             result = self.client.structured(

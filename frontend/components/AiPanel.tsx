@@ -69,7 +69,7 @@ function Thinking({ label }: { label: string }) {
 }
 
 /** AI 摘要與問答。方案指標一律以證據標記引用、已核對;AI 只負責講成白話。 */
-export default function AiPanel({ incident, aiEnabled }: { incident: Incident; aiEnabled: boolean }) {
+export default function AiPanel({ incident, aiEnabled, locked }: { incident: Incident; aiEnabled: boolean; locked: boolean }) {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +147,7 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
         )}
         <div className="actions">
           {QUICK.map((q) => (
-            <button key={q} type="button" disabled={!!pending} onClick={() => ask(q)}>
+            <button key={q} type="button" disabled={locked || !!pending} onClick={() => ask(q)}>
               {q}
             </button>
           ))}
@@ -166,7 +166,7 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
             placeholder={aiEnabled ? "例如:P4 加班的話會怎樣?" : "AI 尚未啟用(後端沒有金鑰)"}
             aria-label="問 AI"
           />
-          <button type="submit" className="primary" disabled={!!pending || !draft.trim()}>
+          <button type="submit" className="primary" disabled={locked || !!pending || !draft.trim()}>
             問
           </button>
         </form>

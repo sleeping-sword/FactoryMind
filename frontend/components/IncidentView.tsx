@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import AiPanel from "./AiPanel";
 import Gantt from "./Gantt";
 import { Legend } from "./Overview";
-import { api } from "@/lib/api";
+import { ApiError, api, outcomeUnknown, requestId } from "@/lib/api";
 import {
+  COST_LABEL,
   MAX_REASON_CHARS,
   METRIC_LABEL,
   MIN_PER_DAY,
@@ -78,11 +79,13 @@ function DecisionPanel({
   plan,
   evaluation,
   act,
+  locked,
 }: {
   incident: Incident;
   plan: Plan;
   evaluation: Evaluation;
   act: Act;
+  locked: boolean;
 }) {
   const [mode, setMode] = useState<"idle" | "approve" | "reject">("idle");
   const [reason, setReason] = useState("");
@@ -98,6 +101,22 @@ function DecisionPanel({
   const existing = evaluation.kpis?.changed_work_orders ?? changes.length - added;
   const tally = `既有 ${existing} + 新排 ${added} = ${existing + added} 張`;
   const applied = incident.applied_plan_id === plan.id;
+
+  async function approve() {
+    const id = requestId();
+    const seen = { snapshot_version: incident.snapshot.version, schedule_version: incident.schedule_version, policy_version: incident.policy_version };
+    await act(async () => {
+      try {
+        await api.approve(incident.id, plan.id, seen, id);
+      } catch (error) {
+        if (!outcomeUnknown(error)) throw error;
+        // 回應沒收到:先查後端有沒有記下這次核准,不盲目重送
+        const now = await api.incident(incident.id).catch(() => null);
+        if (now?.decisions.some((d) => d.request_id === id)) return;
+        throw new ApiError(now ? "核准沒有送達,工廠未改動,可以再按一次。" : "連線中斷,不確定核准是否送達;恢復連線後先看狀態再操作。", 409);
+      }
+    });
+  }
   const needsSignoff = plan.overtime.length > 0 || plan.outsourced.length > 0;
 
   const k = evaluation.kpis;
@@ -134,6 +153,13 @@ function DecisionPanel({
           <div>
             <dt>額外成本</dt>
             <dd>{ntd(k.cost_ntd)}</dd>
+            {/* 各項分開列,試模不併進換模費 */}
+            <dd className="cost-parts">
+              {Object.entries(k.cost_breakdown_ntd)
+                .filter(([, v]) => v > 0)
+                .map(([key, v]) => `${COST_LABEL[key] ?? key} ${ntd(v)}`)
+                .join("・")}
+            </dd>
           </div>
         </dl>
       ) : (
@@ -182,11 +208,11 @@ function DecisionPanel({
 
       {canDecide && ok && mode === "idle" && (
         <div className="actions">
-          <button type="button" className="primary" onClick={() => setMode("approve")}>
+          <button type="button" className="primary" disabled={locked} onClick={() => setMode("approve")}>
             {recommended ? "核准" : "改選這個方案"}
           </button>
           {incident.status === "awaiting_approval" && recommended && (
-            <button type="button" onClick={() => setMode("reject")}>
+            <button type="button" disabled={locked} onClick={() => setMode("reject")}>
               退回
             </button>
           )}
@@ -198,7 +224,7 @@ function DecisionPanel({
             核准 <b>{plan.id}</b>({tally})?{!recommended && "(非系統建議,會記入紀錄)"}
           </p>
           <div className="actions">
-            <button type="button" className="primary" onClick={() => act(() => api.approve(incident.id, plan.id))}>
+            <button type="button" className="primary" disabled={locked} onClick={approve}>
               確認核准
             </button>
             <button type="button" onClick={() => setMode("idle")}>
@@ -227,7 +253,7 @@ function DecisionPanel({
             <button
               type="button"
               className="danger"
-              disabled={reasonProblem !== null}
+              disabled={locked || reasonProblem !== null}
               onClick={() => act(() => api.reject(incident.id, reason.trim()))}
             >
               確認退回
@@ -247,11 +273,14 @@ export default function IncidentView({
   policy,
   aiEnabled,
   act,
+  locked,
 }: {
   incident: Incident;
   policy: Policy;
   aiEnabled: boolean;
   act: Act;
+  /** 連線中斷時唯讀:可以看、可以切換預覽,不能送出異動 */
+  locked: boolean;
 }) {
   const fallback = incident.applied_plan_id ?? incident.ranking?.winner ?? incident.plans[0]?.id ?? ORIGINAL;
   const [selected, setSelected] = useState(fallback);
@@ -358,7 +387,7 @@ export default function IncidentView({
       )}
       {canReassess && (
         <div className="actions">
-          <button type="button" className="primary" onClick={() => act(() => api.reassess(incident.id))}>
+          <button type="button" className="primary" disabled={locked} onClick={() => act(() => api.reassess(incident.id))}>
             重新評估
           </button>
         </div>
@@ -379,7 +408,7 @@ export default function IncidentView({
         </section>
       )}
 
-      <AiPanel incident={incident} aiEnabled={aiEnabled} />
+      <AiPanel incident={incident} aiEnabled={aiEnabled} locked={locked} />
 
       {incident.tasks.some((t) => !t.done) && incident.applied_plan_id && (
         <section className="card">
@@ -387,7 +416,7 @@ export default function IncidentView({
             {incident.tasks.filter((t) => !t.done).map((task) => (
               <li key={task.id}>
                 <b>◐ {task.subject} 維修中</b>
-                <button type="button" onClick={() => act(() => api.confirmTask(incident.id, task.id))}>
+                <button type="button" disabled={locked} onClick={() => act(() => api.confirmTask(incident.id, task.id))}>
                   回報已復機
                 </button>
               </li>
@@ -398,7 +427,7 @@ export default function IncidentView({
 
       {incident.evaluations.length > 0 && (
         <section className="card">
-          {plan && evaluation && <DecisionPanel incident={incident} plan={plan} evaluation={evaluation} act={act} />}
+          {plan && evaluation && <DecisionPanel incident={incident} plan={plan} evaluation={evaluation} act={act} locked={locked} />}
 
           <div className="table-scroll">
             <table className="plans">

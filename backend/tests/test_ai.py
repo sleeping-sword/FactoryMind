@@ -89,3 +89,40 @@ def test_number_check():
     facts = "成本 NT$12,400,交期 D1 20:00"
     assert invented_numbers("成本 NT$12,400,第 2 點", facts) == []
     assert invented_numbers("約 13000 元", facts) == ["13000"]
+
+
+def model_list(*ids: str):
+    """模擬供應端的 /models 清單;Gemini 的識別碼前面帶 models/。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/models")
+        return httpx.Response(200, json={"object": "list", "data": [{"id": i, "object": "model"} for i in ids]})
+
+    config = LLMConfig(api_key="test", model="gemma-4-26b-a4b-it", base_url="https://example.test/v1")
+    return LLMClient(config, transport=httpx.MockTransport(handler))
+
+
+def test_default_model_is_gemma(monkeypatch):
+    """規格要求維持 gemma-4-26b-a4b 家族;沒設定模型時不能悄悄換成別的。"""
+    from factorymind.llm import LLMConfig
+
+    monkeypatch.delenv("FACTORYMIND_LLM_MODEL", raising=False)
+    assert LLMConfig.from_env().model == "gemma-4-26b-a4b-it"
+
+
+def test_startup_check_records_the_provider_model_id():
+    client = model_list("models/gemini-3.5-flash-lite", "models/gemma-4-26b-a4b-it")
+    client.verify_model()
+    status = client.status()
+    assert status["enabled"] is True
+    assert status["check"] == "ok" and status["model_id"] == "models/gemma-4-26b-a4b-it"
+
+
+def test_missing_model_falls_back_to_rules_instead_of_switching():
+    client = model_list("models/gemini-3.5-flash-lite")
+    client.verify_model()
+    status = client.status()
+    assert status["enabled"] is False and status["model"] == "gemma-4-26b-a4b-it"
+    assert status["check"] == "missing" and "gemma-4-26b-a4b-it" in status["note"]
+    _, incident = processed(Advisor(client))
+    assert incident.ai_brief.source == "rules"

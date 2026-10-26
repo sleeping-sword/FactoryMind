@@ -183,6 +183,8 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .identity .warn::before { content: "⚠ "; color: var(--warning); }
 .alert { display: flex; gap: 8px; align-items: baseline; }
 .alert .link { margin-left: auto; font-weight: 400; }
+.moved { display: flex; gap: 8px; align-items: baseline; border: 1px solid var(--series-normal); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; font-size: 13px; }
+.moved .link { margin-left: auto; font-weight: 400; }
 
 .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
@@ -268,8 +270,10 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .decision-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 18px; }
 .decision .tiles dd { font-size: 22px; font-weight: 600; }
 .decision .tiles dd small { font-size: 14px; color: var(--ink); font-weight: 600; }
+.tiles dd.cost-parts, .decision .tiles dd.cost-parts { font-size: 13px; font-weight: 400; color: var(--ink-2); white-space: normal; }
 .fold > summary { cursor: pointer; font-size: 16px; font-weight: 600; }
 .fold[open] > summary { margin-bottom: 12px; }
+.fold > summary small { font-size: 13px; font-weight: 400; color: var(--ink-2); }
 .tasks li b { font-weight: 600; }
 .stepper { margin-bottom: 8px; }
 

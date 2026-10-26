@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 
-from .models import FactorySnapshot, MachineStatus, WorkOrderStatus, by_id, is_compatible
+from .models import FactorySnapshot, MachineStatus, WorkOrderStatus, by_id, machine_fit
 from .plan import Operation, Plan, Violation
 from .policy import Policy
 
@@ -28,15 +28,12 @@ def check_hard_rules(
                 )
             )
         for wo_id in sequence:
-            mold = molds[products[work_orders[wo_id].product_id].mold_id]
-            if not is_compatible(mold, machine):
-                violations.append(
-                    Violation(
-                        code="MOLD_MACHINE_INCOMPATIBLE",
-                        message=f"模具 {mold.id}({mold.min_tonnage}–{mold.max_tonnage} 噸)不可上 {machine_id}({machine.tonnage} 噸)",
-                        subjects=[wo_id, mold.id, machine_id],
-                    )
-                )
+            product = products[work_orders[wo_id].product_id]
+            mold = molds[product.mold_id]
+            # 不可行與資料不足都擋下;資料不足不能當成合規完成
+            fit = machine_fit(product, mold, machine)
+            if fit.state != "ok":
+                violations.append(Violation(code=fit.code, message=fit.reason, subjects=[wo_id, mold.id, machine_id]))
 
     for wo in snapshot.work_orders:
         if wo.status != WorkOrderStatus.IN_PROGRESS:

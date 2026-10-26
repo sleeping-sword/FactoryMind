@@ -93,13 +93,15 @@ def evaluate(
             if products[work_orders[w].product_id].outsource_unit_cost_ntd is not None
         ),
         "setup": setup_min * rates.setup_ntd_per_min,
+        # 試模與換模同費率但分開列,setup_min 不含試模,不會重複計
+        "trial": sum(op.trial_min for op in operations) * rates.setup_ntd_per_min,
     }
 
     busy: Counter[str] = Counter()
     for op in operations:
         # 只計換模與加工的分鐘數;開始到結束的時間差會把跨夜停工也算進去
         wo = work_orders[op.work_order_id]
-        busy[op.machine_id] += op.setup_min + run_minutes(wo.remaining, products[wo.product_id])
+        busy[op.machine_id] += op.setup_min + op.trial_min + run_minutes(wo.remaining, products[wo.product_id])
     load = {}
     for machine in snapshot.machines:
         if machine.status == MachineStatus.UP:

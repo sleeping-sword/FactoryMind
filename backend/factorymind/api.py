@@ -14,12 +14,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .governance import GovernanceError, Incident, VirtualFactory
+from .parameters import process_parameters
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")  # backend/.env:AI 金鑰等設定
 
 factory = VirtualFactory(
     first_event_delay_s=float(os.environ.get("FACTORYMIND_FIRST_EVENT_S", 5)),
-    next_event_delay_s=float(os.environ.get("FACTORYMIND_NEXT_EVENT_S", 30)),
+    # 例如 FACTORYMIND_NEXT_EVENT_S=10,20 只在 10 與 20 秒之間挑;未設定為 30–240 秒、每 30 秒一級
+    **({"next_event_choices_s": tuple(float(s) for s in os.environ["FACTORYMIND_NEXT_EVENT_S"].split(","))}
+       if os.environ.get("FACTORYMIND_NEXT_EVENT_S") else {}),
 )
 
 
@@ -34,10 +37,18 @@ def _auto_events(stop: threading.Event) -> None:
             _process_in_background(incident)
 
 
+def _verify_model() -> None:
+    client = factory.advisor.client
+    client.verify_model()
+    print(f"FactoryMind AI:{client.config.provider} 模型 {client.config.model} → {client.check}"
+          + (f"({client.model_id})" if client.model_id else "") + (f",{client.note}" if client.note else ""), flush=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     stop = threading.Event()
     threading.Thread(target=_auto_events, args=(stop,), daemon=True).start()
+    threading.Thread(target=_verify_model, daemon=True).start()
     yield
     stop.set()
 
@@ -49,8 +60,18 @@ class Actor(BaseModel):
     actor: str = "生產主管"
 
 
+class Seen(BaseModel):
+    """主管畫面上的版本;對不上代表畫面是舊的。"""
+
+    snapshot_version: int
+    schedule_version: int
+    policy_version: str
+
+
 class Approval(Actor):
     plan_id: str
+    expected: Seen | None = None
+    request_id: str | None = None
 
 
 class Rejection(Actor):
@@ -71,6 +92,12 @@ def _guard(action):
 @app.get("/api/state")
 def get_state() -> dict:
     return factory.state()
+
+
+@app.get("/api/parameters")
+def parameters() -> list[dict]:
+    """製程參數出處表:目前快照的限制、來源與確認狀態。"""
+    return process_parameters(factory.snapshot)
 
 
 @app.get("/api/incidents/{incident_id}")
@@ -99,13 +126,18 @@ def reset() -> dict:
 @app.post("/api/factory/emit")
 def emit() -> dict:
     incident = _guard(factory.emit_next)
+    if incident is None:  # 有事件等決定,這件先排隊
+        return {"id": None, "backlog": factory.state()["backlog"]}
     _process_in_background(incident)
     return {"id": incident.id}
 
 
 @app.post("/api/incidents/{incident_id}/approve")
 def approve(incident_id: str, body: Approval) -> dict:
-    return _guard(lambda: factory.approve(incident_id, body.plan_id, body.actor)).model_dump(mode="json")
+    expected = body.expected.model_dump() if body.expected else None
+    return _guard(
+        lambda: factory.approve(incident_id, body.plan_id, body.actor, expected=expected, request_id=body.request_id)
+    ).model_dump(mode="json")
 
 
 @app.post("/api/incidents/{incident_id}/reject")

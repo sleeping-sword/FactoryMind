@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import Gantt from "./Gantt";
 import Machines from "./Machines";
 import { METRIC_LABEL, MIN_PER_DAY, STATUS, duration, ntd, num, timeOfDay } from "@/lib/format";
-import type { FactoryState } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { FactoryState, ProcessParameter } from "@/lib/types";
 
 /** 營運總覽:先讓主管知道要不要介入,再看目前生效的排程。 */
 export default function Overview({ state, onOpen }: { state: FactoryState; onOpen: (id: string) => void }) {
@@ -117,6 +119,7 @@ export default function Overview({ state, onOpen }: { state: FactoryState; onOpe
       </details>
 
       <Capabilities />
+      <ProcessParameters />
 
       <details className="card fold" open>
         <summary>機台與生產流程</summary>
@@ -131,7 +134,7 @@ export function Legend() {
     <div className="legend" aria-hidden>
       <span><i className="swatch tier-normal" /> 一般客戶</span>
       <span><i className="swatch tier-strategic" /> ★ 策略客戶</span>
-      <span><i className="swatch is-setup" /> 換模／換色</span>
+      <span><i className="swatch is-setup" /> 換模／換色／試模</span>
       <span><i className="swatch overtime" /> 加班時段</span>
       <span><i className="swatch night" /> 非上班時間</span>
     </div>
@@ -146,10 +149,60 @@ const ROLES = [
   { step: "確認復機", who: "維修人員" },
 ];
 const CAPABILITIES: { state: "done" | "planned" | "untested"; label: string; items: string[] }[] = [
-  { state: "done", label: "✓ 已實作", items: ["產生方案、試跑、硬規則檢查", "依政策排序", "核准前重驗版本", "維修回報後結案", "AI 摘要與問答"] },
-  { state: "planned", label: "◌ 規劃中", items: ["AI 自主選擇分析工具", "維修預估時間與重算", "AI 數字對回方案與單位", "事件報告匯出"] },
+  { state: "done", label: "✓ 已實作", items: ["產生方案、試跑、硬規則檢查", "依政策排序", "核准前重驗版本", "維修回報後結案", "AI 摘要與問答", "AI 數字對回方案與指標"] },
+  { state: "planned", label: "◌ 規劃中", items: ["AI 自主選擇分析工具", "維修預估時間與重算", "事件報告匯出"] },
   { state: "untested", label: "? 尚未驗證", items: ["投影與實體手機閱讀", "真實模型穩定度", "實廠資料"] },
 ];
+
+/** R05 參數出處表:排程用到的製程限制從哪裡來、確認了沒。 */
+function ProcessParameters() {
+  const [rows, setRows] = useState<ProcessParameter[] | null>(null);
+  useEffect(() => {
+    api.parameters().then(setRows, () => setRows([]));
+  }, []);
+  const pending = rows?.filter((r) => r.status !== "已確認").length ?? 0;
+  return (
+    <details className="card fold">
+      <summary>
+        製程參數出處{rows && rows.length > 0 && <small>・{pending} 項未經製程覆核</small>}
+      </summary>
+      {rows === null ? (
+        <p className="footnote">讀取中…</p>
+      ) : rows.length === 0 ? (
+        <p className="footnote">讀不到參數表,請確認後端服務。</p>
+      ) : (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>參數</th>
+                <th>對象</th>
+                <th>值</th>
+                <th>適用範圍</th>
+                <th>來源・狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.name}-${r.target}`}>
+                  <td>{r.name}</td>
+                  <td>{r.target}</td>
+                  <td>
+                    {r.value} {r.unit}
+                  </td>
+                  <td>{r.scope}</td>
+                  <td>
+                    {r.assumption ? "假設" : r.source}・{r.status}・{r.version}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </details>
+  );
+}
 
 function Capabilities() {
   return (

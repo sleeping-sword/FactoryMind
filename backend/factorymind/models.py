@@ -1,6 +1,7 @@
 """工廠快照:某一時刻的工廠資料副本,所有候選方案的共同起點。"""
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +43,8 @@ class Mold(Model):
     id: str
     min_tonnage: int = Field(gt=0)
     max_tonnage: int = Field(gt=0)
+    # 噸數之外,模具尺寸、繫桿間距、噴嘴等也要合;None 表示沒有這份資料,不默認可上
+    fits_machines: list[str] | None = Field(default=None, description="相容機台清單")
 
 
 class Material(Model):
@@ -58,6 +61,10 @@ class Product(Model):
     units_per_hour: int = Field(gt=0)
     material_kg_per_unit: float = Field(gt=0)
     outsource_unit_cost_ntd: float | None = Field(default=None, description="None 表示不可外包")
+    approved_machines: list[str] | None = Field(default=None, description="客戶認可機台;None 表示客戶沒有指定")
+    proven_machines: list[str] | None = Field(
+        default=None, description="已試模、首件確認過的機台;其他機台第一次生產要加試模時間。None 表示不追蹤"
+    )
 
 
 class Customer(Model):
@@ -98,6 +105,7 @@ class SetupTimes(Model):
     material_change_min: int = Field(ge=0)
     color_darker_min: int = Field(ge=0)
     color_lighter_min: int = Field(ge=0)
+    trial_run_min: int = Field(default=0, ge=0, description="產品第一次上沒試過的機台:試模加首件確認")
 
 
 class CostRates(Model):
@@ -131,3 +139,31 @@ def by_id(items):
 
 def is_compatible(mold: Mold, machine: Machine) -> bool:
     return mold.min_tonnage <= machine.tonnage <= mold.max_tonnage
+
+
+class Fit(Model):
+    """產品能不能上這台機台:可行、不可行、資料不足三種,不把缺資料當成可行。"""
+
+    state: Literal["ok", "blocked", "unknown"]
+    code: str = ""
+    reason: str = ""
+
+
+def machine_fit(product: Product, mold: Mold, machine: Machine) -> Fit:
+    if not is_compatible(mold, machine):
+        return Fit(state="blocked", code="MOLD_MACHINE_INCOMPATIBLE",
+                   reason=f"模具 {mold.id}({mold.min_tonnage}–{mold.max_tonnage} 噸)不可上 {machine.id}({machine.tonnage} 噸)")
+    if mold.fits_machines is None:
+        return Fit(state="unknown", code="FIT_DATA_MISSING",
+                   reason=f"資料不足:模具 {mold.id} 沒有相容機台清單,請補模具尺寸與 {machine.id} 繫桿間距、噴嘴規格後再評估")
+    if machine.id not in mold.fits_machines:
+        return Fit(state="blocked", code="MOLD_NOT_ON_FIT_LIST",
+                   reason=f"模具 {mold.id} 的相容機台清單不含 {machine.id}(噸數雖在範圍內)")
+    if product.approved_machines is not None and machine.id not in product.approved_machines:
+        return Fit(state="blocked", code="MACHINE_NOT_APPROVED",
+                   reason=f"{product.name or product.id} 的客戶只認可 {'、'.join(product.approved_machines)},{machine.id} 不在其中")
+    return Fit(state="ok")
+
+
+def can_run(product: Product, mold: Mold, machine: Machine) -> bool:
+    return machine_fit(product, mold, machine).state == "ok"

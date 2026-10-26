@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from .models import CustomerTier, FactorySnapshot, MachineStatus, WorkOrderStatus, by_id, is_compatible
+from .models import CustomerTier, FactorySnapshot, MachineStatus, WorkOrderStatus, by_id, can_run
 from .plan import OvertimeGrant, Plan
 from .replay import replay
 
@@ -48,10 +48,11 @@ def dispatch(
         return Plan(id=plan_id, label=label, machine_sequences=seqs, overtime=overtime)
 
     for wo in pending:
-        mold = molds[products[wo.product_id].mold_id]
+        product = products[wo.product_id]
+        mold = molds[product.mold_id]
         best = None
         for machine in snapshot.machines:
-            if machine.status != MachineStatus.UP or not is_compatible(mold, machine):
+            if machine.status != MachineStatus.UP or not can_run(product, mold, machine):
                 continue
             ops = {op.work_order_id: op for op in replay(snapshot, trial(machine.id, wo.id)).operations}
             if wo.id not in ops:
