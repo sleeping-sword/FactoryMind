@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import IncidentView from "./IncidentView";
 import Overview from "./Overview";
 import { ApiError, api } from "@/lib/api";
-import { STATUS } from "@/lib/format";
+import { STAGES, STATUS, timeOfDay } from "@/lib/format";
 import type { FactoryState, Incident } from "@/lib/types";
 
 const POLL_MS = 1500;
@@ -152,6 +152,23 @@ export default function App() {
               </button>
             );
           })}
+          {/* 選中事件的處理歷程;放在側欄,看方案時隨時可展開對照 */}
+          {incident && incident.id === selected && (
+            <details className="trace-side">
+              <summary>處理歷程({incident.trace.length})</summary>
+              <ol className="trace">
+                {incident.trace.map((entry) => (
+                  <li key={entry.seq}>
+                    <time>{timeOfDay(entry.at)}</time>
+                    <span className="chip">{STAGES.find((s) => s.key === entry.stage)?.label}</span>
+                    <p>
+                      <b>{entry.actor}</b> {entry.message}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
         </nav>
 
         <div className="content">

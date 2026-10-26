@@ -246,6 +246,13 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .tasks { display: grid; gap: 8px; }
 .tasks li { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .tasks div { display: grid; gap: 2px; }
+/* 左側欄的處理歷程:欄窄,時間與階段一行、內容換到下一行 */
+.trace-side { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.trace-side > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.trace-side[open] > summary { margin-bottom: 8px; }
+.trace-side .trace { max-height: 50vh; overflow-y: auto; }
+.trace-side .trace li { grid-template-columns: auto auto; justify-content: start; }
+.trace-side .trace li p { grid-column: 1 / -1; }
 .trace { display: grid; gap: 8px; }
 .trace li { display: grid; grid-template-columns: 64px 84px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 13px; }
 .trace time { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -307,6 +314,16 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .q::before { content: "問 "; color: var(--muted); font-weight: 400; }
 .a { font-size: 14px; white-space: pre-wrap; }
 .a.muted { color: var(--ink-2); }
+.chat-pending { display: grid; gap: 4px; }
+/* 等 AI 的跳動圓點 */
+.thinking { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.thinking small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--series-normal); animation: dot-bounce 1.2s ease-in-out infinite; }
+.dots i:nth-child(2) { animation-delay: 0.15s; }
+.dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dot-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dots i { animation-duration: 2.4s; transform: none !important; } }
 .ask-form { display: flex; gap: 8px; }
 .ask-form input { flex: 1; min-width: 0; font: inherit; padding: 6px 10px; border: 1px solid var(--axis); border-radius: 8px; background: var(--surface); color: var(--ink); }
 button:disabled { opacity: 0.5; cursor: default; }

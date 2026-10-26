@@ -1,20 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { METRIC_LABEL, timeOfDay } from "@/lib/format";
 import type { Evidence, Incident } from "@/lib/types";
 
 const QUICK = ["為什麼選這個方案?", "其他方案差在哪?", "不處理會怎樣?"];
+const UNIT_AFTER: Record<Evidence["unit"], RegExp> = { 分鐘: /^\s*(分鐘|分|小時)/, 張: /^\s*張/, NT$: /^\s*元/ };
 
 /** 把 [E12] 標記換成可點的數字;點了在下方顯示這個數字屬於哪個方案、指標與版本。 */
 function Cited({ text, evidence, onPick }: { text: string; evidence: Evidence[]; onPick: (e: Evidence) => void }) {
   const byId = new Map(evidence.map((e) => [e.id, e]));
+  const parts = text.split(/\[(E\d+)\]/);
   return (
     <>
-      {text.split(/\[(E\d+)\]/).map((part, i) => {
+      {parts.map((part, i) => {
         const e = i % 2 ? byId.get(part) : undefined;
-        if (!e) return i % 2 ? `[${part}]` : part;
+        if (!e) {
+          // 標記已帶單位;模型又在後面寫一次單位(「[E11] 張」)就拿掉,免得顯示成「12 張 張」
+          const prev = i % 2 === 0 && i > 0 ? byId.get(parts[i - 1]) : undefined;
+          return i % 2 ? `[${part}]` : prev ? part.replace(UNIT_AFTER[prev.unit], "") : part;
+        }
         return (
           <button key={i} type="button" className="ev" title={`${e.plan_id} ${METRIC_LABEL[e.metric]}・點看來源`} onClick={() => onPick(e)}>
             {e.display}
@@ -39,6 +45,26 @@ function EvidenceDetail({ e, onClose }: { e: Evidence; onClose: () => void }) {
         關閉
       </button>
     </p>
+  );
+}
+
+/** 等 AI 時的跳動圓點;Gemma 要 4–12 秒,附上已等秒數讓主管知道沒有當掉。 */
+function Thinking({ label }: { label: string }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span className="thinking" role="status">
+      <span className="dots" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      {label}
+      {seconds > 0 && <small>{seconds} 秒</small>}
+    </span>
   );
 }
 
@@ -75,7 +101,7 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
           className={`chip ${brief.source === "ai" ? "good" : ""}`}
           title={brief.note ?? (brief.source === "ai" ? "方案數字皆已核對方案、指標、單位與版本" : undefined)}
         >
-          {brief.source === "ai" ? `✦ AI・${brief.model}` : aiEnabled && !brief.note ? "AI 撰寫中…" : "規則摘要"}
+          {brief.source === "ai" ? `✦ AI・${brief.model}` : aiEnabled && !brief.note ? <Thinking label="AI 撰寫中" /> : "規則摘要"}
         </span>
       </header>
       {brief.reasons.length > 0 && (
@@ -114,9 +140,10 @@ export default function AiPanel({ incident, aiEnabled }: { incident: Incident; a
           </ol>
         )}
         {pending && (
-          <p className="q" aria-live="polite">
-            {pending} <small>AI 思考中…</small>
-          </p>
+          <div className="chat-pending">
+            <p className="q">{pending}</p>
+            <Thinking label="AI 思考中" />
+          </div>
         )}
         <div className="actions">
           {QUICK.map((q) => (

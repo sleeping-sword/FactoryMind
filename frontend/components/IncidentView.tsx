@@ -516,21 +516,6 @@ export default function IncidentView({
           </div>
         </details>
       </section>
-
-      <details className="card fold">
-        <summary>處理歷程({incident.trace.length})</summary>
-        <ol className="trace">
-          {incident.trace.map((entry) => (
-            <li key={entry.seq}>
-              <time>{timeOfDay(entry.at)}</time>
-              <span className="chip">{STAGES.find((s) => s.key === entry.stage)?.label}</span>
-              <p>
-                <b>{entry.actor}</b> {entry.message}
-              </p>
-            </li>
-          ))}
-        </ol>
-      </details>
     </>
   );
 }
