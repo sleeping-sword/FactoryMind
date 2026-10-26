@@ -1,7 +1,7 @@
 """計算證據:每個方案指標一筆,帶方案、指標、值、單位與版本。
 
-AI 說明裡的方案指標數字一律以證據標記 [E01] 引用,由系統換成證據上的數字;
-引用前先核對方案、指標、值與單位都和證據相同,對不上就不採用。
+AI 說明裡的方案指標數字一律以證據標記 [E01] 引用,由系統換成證據上的數字,模型不寫數字。
+系統核對標記是否寫在它所屬的方案後面、旁邊講的指標是否相同,對不上就不採用。
 """
 
 import re
@@ -81,16 +81,6 @@ def build_evidence(incident) -> list[Evidence]:
     return evidence
 
 
-class Citation(BaseModel):
-    """模型對一個 [Exx] 標記的宣告:它說這是哪個方案、哪個指標、多少、什麼單位。"""
-
-    evidence_id: str
-    plan_id: str
-    metric: str
-    value: float
-    unit: str
-
-
 MARKER = re.compile(r"\[(E\d+)\]")
 _PLAN = re.compile(r"P\d+")
 # 編號與時刻裡的數字不是指標:方案、工單、機台、事件、快照版本、D1 20:00
@@ -108,26 +98,49 @@ def unmarked_metric_numbers(text: str, evidence: list[Evidence]) -> list[str]:
     return sorted(_numbers(_IDS.sub(" ", text)) & metric_numbers)
 
 
-def check_text(text: str, citations: list[Citation], evidence: list[Evidence]) -> list[str]:
-    """一段說明裡的引用問題;空清單表示每個標記都對得回同方案、同指標、同值、同單位的證據。"""
+# 模型常用簡稱;「延誤」兩種都可能,不列
+_METRIC_ALIASES = {
+    "strategic_tardiness_min": ("策略客戶延誤",),
+    "total_tardiness_min": ("總延誤",),
+    "changed_work_orders": ("改動既有工單", "改動工單", "工單數"),
+    "cost_ntd": ("成本", "費用"),
+}
+
+
+def _metric_near(before: str, after: str) -> set[str]:
+    """標記旁邊講到的指標:緊接在前面的字;前面沒有才看緊跟在後的「的總延誤」寫法。"""
+    window = before[-10:]
+    found = {m for m, aliases in _METRIC_ALIASES.items() if any(a in window for a in aliases)}
+    if not found:
+        # 只認標記後直接接「的指標」;「[E11] 與額外成本 [E12]」的額外成本是下一個標記的
+        found = {m for m, aliases in _METRIC_ALIASES.items() if re.match(rf"\s*的\s*(?:{'|'.join(aliases)})", after)}
+    return found
+
+
+def check_text(text: str, evidence: list[Evidence]) -> list[str]:
+    """一段說明裡的引用問題;空清單表示每個標記都是證據表裡的編號,且寫在同方案、同指標旁邊。"""
     known = {e.id: e for e in evidence}
-    declared = {c.evidence_id: c for c in citations}
     problems = []
-    for match in MARKER.finditer(text):
+    matches = list(MARKER.finditer(text))
+    for n, match in enumerate(matches):
         marker = match.group(1)
-        e, c = known.get(marker), declared.get(marker)
+        e = known.get(marker)
         if e is None:
             problems.append(f"[{marker}] 不是證據表裡的編號")
-            continue
-        if c is None:
-            problems.append(f"[{marker}] 沒有列在 citations")
-            continue
-        if (c.plan_id, c.metric, c.unit) != (e.plan_id, e.metric, e.unit) or abs(c.value - e.value) > 1e-6:
-            problems.append(f"[{marker}] 是 {e.label} {e.value:g} {e.unit},宣告卻是 {c.plan_id} {c.metric} {c.value:g} {c.unit}")
             continue
         named = _PLAN.findall(text[: match.start()])
         if not named or named[-1] != e.plan_id:
             problems.append(f"[{marker}] 是 {e.plan_id} 的數字,句子卻放在 {named[-1] if named else '沒寫方案'} 後面")
-    if bare := unmarked_metric_numbers(text, evidence):
-        problems.append(f"方案指標數字 {'、'.join(bare)} 要用證據標記,不可直接寫")
+            continue
+        before = text[matches[n - 1].end() if n else 0 : match.start()]
+        after = text[match.end() : matches[n + 1].start() if n + 1 < len(matches) else len(text)]
+        near = _metric_near(before, after)
+        if near and e.metric not in near:
+            problems.append(f"[{marker}] 是 {e.label},句子卻說是{'、'.join(METRIC_LABEL[m] for m in sorted(near))}")
+    plan = (_PLAN.findall(text) or [None])[0]
+    for number in unmarked_metric_numbers(text, evidence):
+        # 指出可用的標記,模型重試時才知道要改成哪一個
+        hints = [e.id for e in evidence if number in _numbers(f"{e.value:g} {e.display}") and e.plan_id == plan]
+        hint = f"(例如 {'、'.join(f'[{h}]' for h in hints)})" if hints else ""
+        problems.append(f"「{text}」裡的 {number} 是方案指標,要改寫成證據標記{hint},不可直接寫數字")
     return problems

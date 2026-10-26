@@ -7,13 +7,15 @@ from factorymind.governance import VirtualFactory
 from factorymind.llm import LLMClient, LLMConfig
 
 
-def fake_model(*replies: str | int):
-    """依序回傳預先寫好的模型輸出;整數代表 HTTP 錯誤碼。"""
+def fake_model(*replies: str | int | httpx.Response):
+    """依序回傳預先寫好的模型輸出;整數代表 HTTP 錯誤碼,也可直接給 Response。"""
     queue, seen = list(replies), []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(json.loads(request.content))
         reply = queue.pop(0)
+        if isinstance(reply, httpx.Response):
+            return reply
         if isinstance(reply, int):
             return httpx.Response(reply, text="error")
         return httpx.Response(200, json={"choices": [{"message": {"content": reply}}]})
@@ -48,11 +50,21 @@ def test_ai_brief_replaces_rule_brief_and_is_traced():
 
 def test_invented_numbers_are_sent_back_then_fall_back_to_rules():
     made_up = json.dumps({"headline": "延誤約 3.5 小時", "reasons": ["多花 NT$99,999"], "watch": []})
-    advisor, seen = fake_model(made_up, made_up)
+    advisor, seen = fake_model(made_up, made_up, made_up)
     _, incident = processed(advisor)
-    assert len(seen) == 2 and "99999" in seen[1]["messages"][-1]["content"]
+    assert len(seen) == 3 and "99999" in seen[1]["messages"][-1]["content"]
     assert incident.ai_brief.source == "rules" and "不合格" in incident.ai_brief.note
     assert "改用規則" in incident.trace[-1].message
+
+
+def test_short_rate_limit_waits_and_retries(monkeypatch):
+    """每分鐘次數超過時 Gemini 會說幾秒後再試;等得不久就自動重送,不讓主管看到錯誤。"""
+    waits = []
+    monkeypatch.setattr("factorymind.llm.time.sleep", waits.append)
+    reply = json.dumps({"headline": "建議核准 P3", "reasons": [], "watch": []})
+    advisor, seen = fake_model(httpx.Response(429, text="Please retry in 1.3s."), reply)
+    _, incident = processed(advisor)
+    assert incident.ai_brief.source == "ai" and len(seen) == 2 and waits == [1.8]
 
 
 def test_quota_exhausted_is_reported_not_crashing():

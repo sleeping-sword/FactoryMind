@@ -1,7 +1,7 @@
 """AI 角色:報告(事件摘要)與主管問答。
 
 模型只負責把系統算好的結果講成白話,不產生數字、不排序、不能核准。方案指標一律以證據標記 [E01]
-引用,先核對方案、指標、值與單位(見 evidence.py);其他數字必須出自事件資料。不合格就要求重寫,
+引用,由系統換成數字並核對方案與指標(見 evidence.py);其他數字必須出自事件資料。不合格就要求重寫,
 仍不合格就退回規則產生的文字,並標示來源。
 """
 
@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .evidence import MARKER, METRIC_LABEL, Citation, Evidence, check_text, clock, duration, ntd, show
+from .evidence import MARKER, METRIC_LABEL, Evidence, check_text, clock, duration, ntd, show
 from .llm import LLMClient, LLMError
 from .models import CustomerTier, by_id
 from .evaluate import changed_work_orders
@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """你是 FactoryMind 的報告助理,對象是塑膠射出廠�
 - 用繁體中文、白話、短句,避免指標欄位名與英文代碼(方案、工單、機台編號可以用)。
 - 只根據提供的「事件資料」回答;資料裡沒有的就直說不知道,不要推測故障原因或復機時間。
 - 方案的指標(策略客戶延誤、總延誤、改動既有工單數、額外成本)不要直接寫數字,一律寫證據標記,例如「P3 額外成本 [E12]」;
-  標記要緊接在它所屬的方案後面,並把每個用到的標記照證據表抄進 citations(方案、指標鍵、值、單位都要相同)。
+  標記要緊接在它所屬的方案與指標後面。數字由系統填入,不要在標記後面再寫數字或單位。
 - 其他數字只能照抄資料中出現的寫法,不可自行換算、加總或估計。
 - 比較方案時講清楚是在哪些方案之間比較;「合規但順位落選」不是「違規」。
 - 方案的計算、硬規則檢核與排序都由系統完成;你不能核准、退回或修改方案,也不能放寬規則。
@@ -68,12 +68,10 @@ class _Brief(BaseModel):
     headline: str = Field(description="一句話,25 字內,說建議主管做什麼")
     reasons: list[str] = Field(max_length=3, description="最多 3 點:為什麼選它、其他方案為何落選")
     watch: list[str] = Field(max_length=3, description="最多 3 點:核准前要注意的事,沒有就給空陣列")
-    citations: list[Citation] = Field(default=[], description="文字中每個 [Exx] 標記,照證據表抄")
 
 
 class _Answer(BaseModel):
     answer: str = Field(description="給主管的回答,150 字內")
-    citations: list[Citation] = Field(default=[], description="回答中每個 [Exx] 標記,照證據表抄")
 
 
 def _now() -> str:
@@ -186,7 +184,8 @@ def build_facts(incident, policy: Policy, evidence: list[Evidence]) -> str:
         if plan.id in eliminated:
             verdict = _elimination(eliminated[plan.id], ref, incident.ranking.winner)
         lines.append(f"- {plan.id}「{plan.label}」:{_outcome(ev, ref)}" + (f";{','.join(extras)}" if extras else "") + (f"。{verdict}" if verdict else ""))
-        if ev.kpis is not None:
+        # 只列建議方案改動哪些工單;其他方案的清單很長、摘要用不到,只會拖慢模型
+        if ev.kpis is not None and incident.ranking and incident.ranking.winner == plan.id:
             lines.append(f"  {_changes(ev, incident.reference)}")
     if incident.ranking:
         if incident.ranking.undecided_reason:
@@ -196,7 +195,7 @@ def build_facts(incident, policy: Policy, evidence: list[Evidence]) -> str:
 
     if evidence:
         lines += ["", "## 證據表(方案指標只能用這些標記引用)"]
-        lines += [f"- [{e.id}] {e.label} = {e.display}(指標鍵 {e.metric},值 {e.value:g},單位 {e.unit})" for e in evidence]
+        lines += [f"- [{e.id}] {e.label} = {e.display}" for e in evidence]
 
     if incident.decisions:
         lines += ["", "## 主管已做的決定"]
@@ -270,7 +269,7 @@ def _texts(result: BaseModel) -> list[str]:
 def _evidence_check(facts: str, evidence: list[Evidence]):
     def check(result: _Brief | _Answer) -> str | None:
         texts = _texts(result)
-        problems = [p for t in texts for p in check_text(t, result.citations, evidence)]
+        problems = [p for t in texts for p in check_text(t, evidence)]
         if any(_CAUSE_CLAIM.search(t) for t in texts):
             problems.append("資料沒有故障原因,不可推測或描述停機原因")
         if bad := invented_numbers(" ".join(texts), facts):
