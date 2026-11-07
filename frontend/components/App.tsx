@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { AiChat } from "./AiPanel";
 import IncidentView from "./IncidentView";
 import Overview from "./Overview";
 import { ApiError, api } from "@/lib/api";
@@ -8,6 +9,64 @@ import { NEEDS_DECISION, STAGES, STATUS, timeOfDay } from "@/lib/format";
 import type { FactoryState, Incident, Status } from "@/lib/types";
 
 const POLL_MS = 1500;
+const CHAT_W = { min: 240, max: 640, initial: 280, key: "factorymind.chatWidth" };
+
+/** 問 AI 欄左緣的拖拉把手;寬度記在這台瀏覽器,下次打開沿用。 */
+function ChatResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+  const clamp = (w: number) => Math.round(Math.min(CHAT_W.max, Math.max(CHAT_W.min, w)));
+  const save = (w: number) => {
+    try {
+      localStorage.setItem(CHAT_W.key, String(w));
+    } catch {}
+  };
+  return (
+    <div
+      className="chat-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="調整問 AI 欄寬"
+      aria-valuenow={width}
+      aria-valuemin={CHAT_W.min}
+      aria-valuemax={CHAT_W.max}
+      tabIndex={0}
+      title="拖拉調整寬度,雙擊還原"
+      onPointerDown={(e) => {
+        const startX = e.clientX;
+        const startW = width;
+        let last = startW;
+        const el = e.currentTarget;
+        el.setPointerCapture(e.pointerId);
+        document.body.classList.add("resizing");
+        const move = (ev: PointerEvent) => {
+          last = clamp(startW + startX - ev.clientX);
+          onChange(last);
+        };
+        const up = () => {
+          el.removeEventListener("pointermove", move);
+          el.removeEventListener("pointerup", up);
+          el.removeEventListener("pointercancel", up);
+          document.body.classList.remove("resizing");
+          save(last);
+        };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+        el.addEventListener("pointercancel", up);
+      }}
+      onDoubleClick={() => {
+        onChange(CHAT_W.initial);
+        save(CHAT_W.initial);
+      }}
+      onKeyDown={(e) => {
+        const step = e.key === "ArrowLeft" ? 20 : e.key === "ArrowRight" ? -20 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const w = clamp(width + step);
+        onChange(w);
+        save(w);
+      }}
+    />
+  );
+}
 
 export default function App() {
   const [state, setState] = useState<FactoryState | null>(null);
@@ -17,6 +76,7 @@ export default function App() {
   const [incident, setIncident] = useState<Incident | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [moved, setMoved] = useState<string | null>(null);
+  const [chatWidth, setChatWidth] = useState(CHAT_W.initial);
   const known = useRef(new Set<string>());
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -48,6 +108,13 @@ export default function App() {
     } catch {
       setOffline(true);
     }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(CHAT_W.key));
+      if (saved >= CHAT_W.min && saved <= CHAT_W.max) setChatWidth(saved);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -103,6 +170,8 @@ export default function App() {
     );
   }
 
+  // 事件有 AI 摘要後才能問;營運總覽不顯示問答欄
+  const showing = selected !== null && incident?.id === selected && incident.ai_brief ? incident : null;
   const waiting = state.incidents.filter((i) => STATUS[i.status].tone === "wait" || STATUS[i.status].tone === "critical");
 
   return (
@@ -178,7 +247,10 @@ export default function App() {
         </p>
       )}
 
-      <div className="layout">
+      <div
+        className={`layout${showing ? " has-chat" : ""}`}
+        style={showing ? ({ "--chat-w": `${chatWidth}px` } as CSSProperties) : undefined}
+      >
         <nav className="sidebar" aria-label="事件清單">
           <button type="button" className={selected === null ? "is-current" : ""} onClick={() => setSelected(null)}>
             <b>營運總覽</b>
@@ -225,6 +297,13 @@ export default function App() {
             <section className="card empty"><h2>讀取事件中…</h2></section>
           )}
         </div>
+
+        {showing && (
+          <aside className="chat-side">
+            <ChatResizer width={chatWidth} onChange={setChatWidth} />
+            <AiChat key={showing.id} incident={showing} aiEnabled={state.ai.enabled} locked={offline} />
+          </aside>
+        )}
       </div>
     </main>
   );

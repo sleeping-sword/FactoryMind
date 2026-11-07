@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { METRIC_LABEL, timeOfDay } from "@/lib/format";
 import type { Evidence, Incident } from "@/lib/types";
@@ -68,29 +68,13 @@ function Thinking({ label }: { label: string }) {
   );
 }
 
-/** AI 摘要與問答。方案指標一律以證據標記引用、已核對;AI 只負責講成白話。 */
-export default function AiPanel({ incident, aiEnabled, locked }: { incident: Incident; aiEnabled: boolean; locked: boolean }) {
-  const [draft, setDraft] = useState("");
-  const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+/** AI 摘要。方案指標一律以證據標記引用、已核對;AI 只負責講成白話。 */
+export default function AiPanel({ incident, aiEnabled }: { incident: Incident; aiEnabled: boolean }) {
   const [picked, setPicked] = useState<Evidence | null>(null);
   const brief = incident.ai_brief;
   if (!brief) return null;
   // 摘要寫於決策前;套用後保留原文當歷史,不隨後續進度改寫
   const historical = incident.applied_plan_id !== null;
-
-  async function ask(question: string) {
-    if (!question.trim() || pending) return;
-    setPending(question);
-    setError(null);
-    try {
-      await api.ask(incident.id, question);
-      setDraft("");
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "沒有送出,請確認後端服務是否正常。");
-    }
-    setPending(null);
-  }
 
   return (
     <section className="card ai">
@@ -124,9 +108,45 @@ export default function AiPanel({ incident, aiEnabled, locked }: { incident: Inc
       )}
       {picked && <EvidenceDetail e={picked} onClose={() => setPicked(null)} />}
       {brief.source === "rules" && brief.note && <p className="footnote">AI 沒有完成:{brief.note}</p>}
+    </section>
+  );
+}
 
-      <details className="ask" open={incident.chat.length > 0 || undefined}>
-        <summary>問 AI</summary>
+/** 問 AI;放在右側欄,看方案、甘特圖時都能對照著問。 */
+export function AiChat({ incident, aiEnabled, locked }: { incident: Incident; aiEnabled: boolean; locked: boolean }) {
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Evidence | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+
+  // 新回答或等待中時把問答捲到最下面;只捲問答區,不動整頁
+  useEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [incident.chat.length, pending]);
+
+  async function ask(question: string) {
+    if (!question.trim() || pending) return;
+    setPending(question);
+    setError(null);
+    try {
+      await api.ask(incident.id, question);
+      setDraft("");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "沒有送出,請確認後端服務是否正常。");
+    }
+    setPending(null);
+  }
+
+  return (
+    <section className="card chat-panel" aria-label="問 AI">
+      <header className="card-head split">
+        <h2>問 AI</h2>
+        <small>{incident.id}</small>
+      </header>
+      <div className="chat-scroll" ref={scroller}>
+        {incident.chat.length === 0 && !pending && <p className="hint">針對這個事件的方案提問</p>}
         {incident.chat.length > 0 && (
           <ol className="chat">
             {incident.chat.map((turn, i) => (
@@ -145,33 +165,34 @@ export default function AiPanel({ incident, aiEnabled, locked }: { incident: Inc
             <Thinking label="AI 思考中" />
           </div>
         )}
-        <div className="actions">
-          {QUICK.map((q) => (
-            <button key={q} type="button" disabled={locked || !!pending} onClick={() => ask(q)}>
-              {q}
-            </button>
-          ))}
-        </div>
-        <form
-          className="ask-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            ask(draft);
-          }}
-        >
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            maxLength={300}
-            placeholder={aiEnabled ? "例如:P4 加班的話會怎樣?" : "AI 尚未啟用(後端沒有金鑰)"}
-            aria-label="問 AI"
-          />
-          <button type="submit" className="primary" disabled={locked || !!pending || !draft.trim()}>
-            問
+      </div>
+      {picked && <EvidenceDetail e={picked} onClose={() => setPicked(null)} />}
+      <div className="quick">
+        {QUICK.map((q) => (
+          <button key={q} type="button" disabled={locked || !!pending} onClick={() => ask(q)}>
+            {q}
           </button>
-        </form>
-        {error && <p className="footnote">✕ {error}</p>}
-      </details>
+        ))}
+      </div>
+      <form
+        className="ask-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          ask(draft);
+        }}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          maxLength={300}
+          placeholder={aiEnabled ? "例如:P4 加班的話會怎樣?" : "AI 尚未啟用(後端沒有金鑰)"}
+          aria-label="問 AI"
+        />
+        <button type="submit" className="primary" disabled={locked || !!pending || !draft.trim()}>
+          問
+        </button>
+      </form>
+      {error && <p className="footnote">✕ {error}</p>}
     </section>
   );
 }
