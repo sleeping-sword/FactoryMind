@@ -15,6 +15,10 @@
   --critical: #d03b3b;
   --warning: #fab219;
   --select: rgba(42, 120, 214, 0.08);
+  --q-bg: rgba(42, 120, 214, 0.1);
+  --q-line: rgba(42, 120, 214, 0.45);
+  --a-bg: #f1efe8;
+  --a-line: #d6d3c7;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -31,6 +35,10 @@
     --series-normal: #3987e5;
     --series-strategic: #d95926;
     --select: rgba(57, 135, 229, 0.14);
+    --q-bg: rgba(57, 135, 229, 0.18);
+    --q-line: rgba(57, 135, 229, 0.55);
+    --a-bg: #232321;
+    --a-line: #3a3a37;
   }
 }
 
@@ -309,16 +317,42 @@ button.link { border: 0; background: none; padding: 0; text-decoration: underlin
 .ev-detail strong { color: var(--ink); }
 .field-hint { font-size: 13px; color: var(--ink-2); }
 .field-hint.bad::before { content: "✕ "; color: var(--critical); }
-.ask > summary { cursor: pointer; color: var(--ink-2); font-weight: 600; }
-.ask[open] { display: grid; gap: 10px; }
-.ask[open] > summary { margin-bottom: 2px; }
-.chat { display: grid; gap: 10px; }
-.chat li { display: grid; gap: 4px; }
-.q { font-weight: 600; font-size: 13px; }
-.q::before { content: "問 "; color: var(--muted); font-weight: 400; }
-.a { font-size: 14px; white-space: pre-wrap; }
-.a.muted { color: var(--ink-2); }
-.chat-pending { display: grid; gap: 4px; }
+/* 問 AI 右側欄:窄欄固定在畫面右邊,左緣可拖拉調寬(--chat-w);手機時排到內容下方 */
+.layout.has-chat { grid-template-columns: 250px minmax(0, 1fr) var(--chat-w, 280px); }
+.shell:has(.layout.has-chat) { max-width: none; }
+.chat-side { position: sticky; top: 12px; min-width: 0; }
+.chat-resizer { position: absolute; top: 0; bottom: 0; left: -12px; width: 10px; cursor: col-resize; touch-action: none; border-radius: 4px; }
+.chat-resizer::after { content: ""; position: absolute; top: 50%; left: 4px; width: 2px; height: 40px; margin-top: -20px; border-radius: 1px; background: var(--axis); }
+.chat-resizer:hover, .chat-resizer:focus-visible { background: var(--select); outline: none; }
+.chat-resizer:hover::after, .chat-resizer:focus-visible::after { background: var(--series-normal); }
+body.resizing { cursor: col-resize; user-select: none; }
+.chat-panel { display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 24px); }
+.chat-panel .card-head { margin-bottom: 0; }
+.chat-panel h2 { font-size: 17px; }
+.chat-panel .card-head small { color: var(--ink-2); }
+.chat-scroll { flex: 1; min-height: 120px; overflow-y: auto; }
+.chat-scroll .hint { font-size: 13px; color: var(--ink-2); }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick button { font-size: 13px; padding: 4px 10px; }
+@media (max-width: 900px) {
+  .layout.has-chat { grid-template-columns: 1fr; }
+  .chat-side { position: static; }
+  .chat-resizer { display: none; }
+  .chat-panel { max-height: none; }
+  .chat-scroll { max-height: 50vh; }
+}
+/* 問答泡泡:主管的問題靠右、藍框;AI 的回答靠左、米灰框 */
+.chat { display: grid; gap: 12px; }
+.chat li, .chat-pending { display: grid; gap: 6px; }
+.q, .a { margin: 0; padding: 8px 10px; border: 1px solid; border-radius: 10px; }
+.q { justify-self: end; max-width: 92%; font-weight: 600; font-size: 13px; background: var(--q-bg); border-color: var(--q-line); border-bottom-right-radius: 3px; }
+.a { justify-self: start; max-width: 100%; font-size: 14px; white-space: pre-wrap; background: var(--a-bg); border-color: var(--a-line); border-bottom-left-radius: 3px; }
+.q::before, .a::before { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; margin-bottom: 2px; }
+.q::before { content: "你"; color: var(--series-normal); text-align: right; }
+.a::before { content: "✦ AI"; color: var(--good); white-space: normal; }
+.a.muted { color: var(--ink-2); border-style: dashed; }
+.a.muted::before { content: "系統"; color: var(--muted); }
+.chat-pending .thinking { justify-self: start; padding: 8px 10px; border: 1px dashed var(--a-line); border-radius: 10px; background: var(--a-bg); }
 /* 等 AI 的跳動圓點 */
 .thinking { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
 .thinking small { color: var(--muted); font-variant-numeric: tabular-nums; }

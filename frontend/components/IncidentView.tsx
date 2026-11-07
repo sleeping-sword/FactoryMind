@@ -408,7 +408,7 @@ export default function IncidentView({
         </section>
       )}
 
-      <AiPanel incident={incident} aiEnabled={aiEnabled} locked={locked} />
+      <AiPanel incident={incident} aiEnabled={aiEnabled} />
 
       {incident.tasks.some((t) => !t.done) && incident.applied_plan_id && (
         <section className="card">
