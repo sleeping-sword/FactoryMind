@@ -30,7 +30,7 @@ def test_every_plan_metric_is_evidence_with_versions_and_unit():
     factory, incident = processed()
     evidence = build_evidence(incident)
     p3_cost = next(e for e in evidence if e.plan_id == "P3" and e.metric == "cost_ntd")
-    assert (p3_cost.value, p3_cost.unit, p3_cost.display) == (19000, "NT$", "NT$19,000")
+    assert (p3_cost.value, p3_cost.unit, p3_cost.display) == (16600, "NT$", "NT$16,600")
     assert p3_cost.incident_id == incident.id
     assert p3_cost.snapshot_version == incident.snapshot.version
     assert p3_cost.policy_version == factory.policy.version and p3_cost.engine_version
@@ -123,7 +123,7 @@ def test_model_brief_keeps_cited_evidence_with_versions():
     _, incident = processed_with(advisor)
     brief = incident.ai_brief
     assert brief.source == "ai" and brief.reasons == [f"P3 額外成本只有 [{p3.id}]"]
-    assert [(e.id, e.plan_id, e.display) for e in brief.evidence] == [(p3.id, "P3", "NT$19,000")]
+    assert [(e.id, e.plan_id, e.display) for e in brief.evidence] == [(p3.id, "P3", "NT$16,600")]
     assert brief.evidence[0].snapshot_version == incident.snapshot.version
     assert f"[{p3.id}] P3 額外成本" in seen[0]["messages"][1]["content"]  # 模型看得到證據表
 

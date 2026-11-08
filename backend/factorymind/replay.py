@@ -124,6 +124,8 @@ def replay(snapshot: FactorySnapshot, plan: Plan) -> ReplayResult:
             proven[product.id].add(machine_id)
         state = states[machine_id]
         mold_changed = state.mold_id != product.mold_id
+        if mold_changed and state.mold_id and mold_holder.get(state.mold_id) == machine_id:
+            del mold_holder[state.mold_id]  # 換下來的模具已不在這台機上,別台再拿走它時不能把這台現在的模具清掉
         previous_holder = mold_holder.get(product.mold_id)
         if previous_holder and previous_holder != machine_id:
             states[previous_holder].mold_id = None

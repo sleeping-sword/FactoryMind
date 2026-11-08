@@ -23,7 +23,7 @@ def test_incident_stops_at_approval_without_touching_the_factory():
     assert incident.status == Status.AWAITING_APPROVAL
     assert incident.assessment.affected_work_orders == ["WO-01", "WO-07", "WO-16", "WO-R1"]
     assert incident.assessment.if_unhandled  # 原排程用到停機機台、急單未排入
-    assert incident.ranking.winner == "P3"
+    assert incident.ranking.winner == "P4"
     assert any(not ev.eligible for ev in incident.evaluations)  # 至少一個方案被硬規則擋下
     assert [t.stage for t in incident.trace] == [Stage.DETECT, Stage.ASSESS, Stage.PROPOSE, Stage.SIMULATE, Stage.DECIDE]
     assert factory.evaluation is before and factory.schedule_version == 1
@@ -33,9 +33,9 @@ def test_incident_stops_at_approval_without_touching_the_factory():
 def test_approval_applies_plan_and_waits_for_repair_before_closing():
     factory = VirtualFactory()
     incident = main_scenario(factory)
-    factory.approve(incident.id, "P3", "王主管")
+    factory.approve(incident.id, "P4", "王主管")
     assert incident.status == Status.APPLIED_PENDING_TASKS
-    assert factory.plan.id == "P3" and factory.schedule_version == 2
+    assert factory.plan.id == "P4" and factory.schedule_version == 2
     assert factory.state()["schedule"]["still_valid"]
     assert incident.decisions[-1].followed_recommendation is True
     assert incident.decisions[-1].actor == "王主管"
@@ -62,7 +62,7 @@ def test_rejection_is_recorded_and_another_plan_can_still_be_chosen():
     factory.reject(incident.id, "王主管", "不想動這麼多工單")
     assert incident.status == Status.REJECTED
     assert factory.schedule_version == 1
-    other = next(ev.plan_id for ev in incident.evaluations if ev.eligible and ev.plan_id != "P3")
+    other = next(ev.plan_id for ev in incident.evaluations if ev.eligible and ev.plan_id != incident.ranking.winner)
     factory.approve(incident.id, other, "王主管")
     assert [d.kind for d in incident.decisions] == ["rejected", "approved"]
     assert incident.decisions[-1].followed_recommendation is False
