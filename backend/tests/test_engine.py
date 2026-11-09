@@ -118,6 +118,18 @@ def test_one_mold_cannot_run_on_two_machines_at_once():
     assert spans(ev)["W2"] == ("M2", 580, 120, 750)
 
 
+def test_taking_back_a_swapped_out_mold_does_not_unmount_the_new_one():
+    # M1 把原本的 X 換成 Y;M2 接著拿走 X。M1 上裝的是 Y,下一張同模的 W3 不必再換模
+    snap = factory([wo("W1", "PY", 100), wo("W2", "PX", 100), wo("W3", "PY", 50)])
+    ev = evaluate(snap, plan(m1=["W1", "W3"], m2=["W2"]), POLICY)
+    assert spans(ev) == {
+        "W1": ("M1", 480, 120, 700),
+        "W2": ("M2", 480, 120, 700),
+        "W3": ("M1", 700, 0, 750),
+    }
+    assert ev.kpis.mold_changes == 2
+
+
 def test_tardiness_counts_only_lateness_and_splits_strategic():
     snap = factory([wo("W1", "PX", 100, due_min=500, customer="S"), wo("W2", "PX", 100, due_min=5000), wo("W3", "PY", 100, due_min=560)])
     ev = evaluate(snap, plan(m1=["W1", "W2"], m2=["W3"]), POLICY)

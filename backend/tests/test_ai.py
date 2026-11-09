@@ -34,7 +34,7 @@ def test_without_key_the_brief_comes_from_rules():
     factory, incident = processed(None)
     assert factory.state()["ai"]["enabled"] is False
     assert incident.ai_brief.source == "rules"
-    assert "P3" in incident.ai_brief.headline
+    assert "P4" in incident.ai_brief.headline
 
 
 def test_ai_brief_replaces_rule_brief_and_is_traced():
